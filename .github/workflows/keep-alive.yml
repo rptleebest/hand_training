@@ -1,1 +1,63 @@
+name: Wake Up Streamlit App
 
+on:
+  schedule:
+    # 4시간마다 실행 (UTC 기준 0, 4, 8, 12, 16, 20시)
+    - cron: "0 */4 * * *"
+  workflow_dispatch:
+
+jobs:
+  wake-up:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Playwright
+        run: |
+          pip install playwright
+          playwright install chromium
+
+      - name: Run Sleep-Prevention Script
+        run: |
+          python -c "
+          import time
+          from playwright.sync_api import sync_playwright
+
+          URL = 'https://hand_training.streamlit.app'
+
+          with sync_playwright() as p:
+              browser = p.chromium.launch(headless=True)
+              page = browser.new_page()
+              
+              print(f'{URL} 접속 중...')
+              # 타임아웃을 60초로 늘려 부팅 대기
+              page.goto(URL, timeout=60000)
+              
+              # 1. '앱 깨우기' 버튼이 있는지 확인 (대소문자/띄어쓰기 무관하게 포괄적 검색)
+              wakeup_button = page.locator('button', has_text='get this app back up')
+              if wakeup_button.count() > 0:
+                  print('절전 모드 감지! 깨우기 버튼을 클릭합니다.')
+                  wakeup_button.click()
+                  # 클릭 후 서버가 재시작될 때까지 충분히 대기 (30초)
+                  time.sleep(30)
+              
+              # 2. Streamlit 앱이 정상적으로 렌더링(웹소켓 연결)되었는지 확인
+              # '가상 검사결과표' 또는 '사례 학습 모드' 텍스트가 화면에 뜰 때까지 대기
+              try:
+                  page.wait_for_selector('text=사례 학습 모드', timeout=30000)
+                  print('앱이 정상적으로 활성화되었습니다 (웹소켓 연결 완료).')
+                  time.sleep(10) # 봇이 10초간 화면에 머물며 활성 상태 유지
+              except Exception as e:
+                  print('경고: 앱이 완전히 로딩되지 않았을 수 있습니다.', e)
+                  
+              browser.close()
+          "
+
+      - name: Keepalive Workflow
+        uses: gautamkrishnar/keepalive-workflow@v2

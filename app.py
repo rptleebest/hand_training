@@ -134,7 +134,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v15")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -184,10 +184,10 @@ with st.sidebar:
 st.markdown(
     """
     **사용 순서**  
-    1. 앱 안에서 **카메라/모델 시작**을 누르고 카메라 권한을 허용합니다.  
+    1. 앱 안에서 **카메라 켜기**를 누르고 카메라 권한을 허용합니다.  
     2. 스마트폰/태블릿에서는 먼저 **소리 활성화/테스트**를 직접 누릅니다.  
     3. 손이 화면 중앙에 보이게 하고 **손 편 상태 보정**과 **쥔/집은 상태 보정**을 시행합니다.  
-    4. 선택한 과제에 따라 물방울, 공기방울, 물컵 목표를 수행합니다.  
+    4. 보정이 완료되면 **훈련 시작**을 눌러 선택한 과제를 수행합니다.  
     """
 )
 
@@ -250,20 +250,21 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v15</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="outputCanvas"></canvas>
-      <div class="overlayBanner"><div id="bigInstruction">카메라/모델 시작을 누르세요</div><div id="subInstruction">소리 활성화 후 손을 화면 중앙에 보여 주세요.</div></div>
+      <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 보정 완료 후 ⑤ 훈련 시작을 눌러야 물방울이 나타납니다.</div></div>
     </div>
     <div class="sidePanel">
       <div class="buttons">
-        <button id="btnStart" class="primary">카메라/모델 시작</button>
-        <button id="btnSound" class="blue">소리 활성화/테스트</button>
-        <button id="btnOpenCal" class="warn">손 편 상태 보정</button>
-        <button id="btnCloseCal" class="warn">쥔/집은 상태 보정</button>
-        <button id="btnReset" class="blue">훈련 새로 시작</button>
+        <button id="btnCameraOnly" class="primary">① 카메라만 켜기</button>
+        <button id="btnSound" class="blue">② 소리 활성화/테스트</button>
+        <button id="btnOpenCal" class="warn">③ 손 편 상태 보정</button>
+        <button id="btnCloseCal" class="warn">④ 쥔/집은 상태 보정</button>
+        <button id="btnTrainStart" class="blue">⑤ 훈련 시작</button>
+        <button id="btnAbort" class="danger">훈련 중단</button>
         <button id="btnPause">일시정지</button>
         <button id="btnStop" class="danger">카메라 정지</button>
       </div>
@@ -354,11 +355,11 @@ const ctx = canvas.getContext('2d');
 const ui = {
   modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), downloadArea: document.getElementById('downloadArea')
 };
-const btn = { start:document.getElementById('btnStart'), sound:document.getElementById('btnSound'), openCal:document.getElementById('btnOpenCal'), closeCal:document.getElementById('btnCloseCal'), reset:document.getElementById('btnReset'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
+const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.getElementById('btnSound'), openCal:document.getElementById('btnOpenCal'), closeCal:document.getElementById('btnCloseCal'), train:document.getElementById('btnTrainStart'), abort:document.getElementById('btnAbort'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
 
 const messages = {
   sound_test:'소리 안내가 활성화되었습니다.',
-  start_camera:'카메라를 시작합니다. 손을 화면 중앙에 보여 주세요.',
+  start_camera:'카메라만 켜졌습니다. 지금은 훈련 전 준비 상태입니다. 손 편 상태 보정과 쥔 상태 보정을 완료한 뒤 훈련 시작 버튼을 누르세요.',
   hand_not_found:'손이 보이지 않습니다. 손 전체가 화면에 들어오도록 조정하세요.',
   wrong_hand:'선택한 손이 아닙니다. 훈련 손을 다시 확인하세요.',
   low_quality:'손 인식이 불안정합니다. 조명을 밝게 하고 손 가림을 줄여 주세요.',
@@ -383,10 +384,12 @@ const messages = {
   air_bubble_hold:'좋습니다. 물방울을 잡은 상태를 잠시 유지하세요.',
 
   pause:'훈련을 일시정지합니다.',
-  resume:'훈련을 다시 시작합니다.'
+  resume:'훈련을 다시 시작합니다.',
+  training_start:'훈련을 시작합니다. 화면 안내와 음성 안내에 따라 물방울을 하나씩 터뜨리세요.',
+  training_abort:'훈련을 중단했습니다. 다른 옵션을 선택하거나 보정을 다시 한 뒤 훈련 시작 버튼을 누르세요.'
 };
 
-let handLandmarker=null, faceLandmarker=null, stream=null, running=false, paused=false, animationId=null, lastVideoTime=-1;
+let handLandmarker=null, faceLandmarker=null, stream=null, running=false, cameraOnlyReady=false, trainingActive=false, paused=false, animationId=null, lastVideoTime=-1;
 let audioCtx=null, soundUnlocked=false, lastSpeakKey='', lastSpeakAt=0;
 let speechQueue=[], speechActive=false, speechMaxQueue=12, selectedKoreanVoice=null;
 let state='idle', score=0, attempts=0, successes=0, failureCount=0, reactionTimes=[], successTimes=[], gameStartTime=0;
@@ -398,7 +401,7 @@ let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundA
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v15 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -552,12 +555,15 @@ function drainSpeechQueue(){
   }catch(e){ speechActive=false; toneFor(item.key); updateVoiceStatus('음성 실패'); drainSpeechQueue(); }
 }
 
-async function startApp(){
-  if(running) return;
+async function startCameraOnly(){
+  if(running){
+    setInstruction('카메라가 이미 켜져 있습니다','보정을 완료한 뒤 훈련 시작 버튼을 누르세요.','ready');
+    return;
+  }
   try{
     if(!soundUnlocked && CONFIG.soundMode!=='silent') await unlockAudio();
-    setInstruction('버튼 입력이 확인되었습니다','MediaPipe Hands 모듈과 모델을 불러오는 중입니다. 잠시 기다려 주세요.','info');
-    log('카메라/모델 시작 버튼이 눌렸습니다. MediaPipe Hands 모듈을 불러오는 중입니다.');
+    setInstruction('카메라와 모델을 준비합니다','MediaPipe Hands 모듈과 모델을 불러오는 중입니다. 잠시 기다려 주세요.','info');
+    log('카메라만 켜기 버튼이 눌렸습니다. MediaPipe Hands 모듈을 불러오는 중입니다. 훈련은 아직 시작하지 않습니다.');
     await loadVisionModule();
     const wasmBase = visionModuleUrl
       ? visionModuleUrl.replace(/vision_bundle\.mjs(?:\?module)?$/, 'wasm')
@@ -613,11 +619,45 @@ async function startApp(){
     stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:CONFIG.useFrontCamera?'user':'environment', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:24,max:30}}, audio:false });
     video.srcObject=stream; await video.play();
     canvas.width=video.videoWidth||960; canvas.height=video.videoHeight||720;
-    running=true; paused=false; resetGame(false); speakOnce('start_camera',true); speakText('task_begin_'+targetSerial, taskIntroText(), true); renderLoop();
+    running=true; cameraOnlyReady=true; trainingActive=false; paused=false; target=null; particles=[]; stage='camera_only_ready'; state='camera_only_ready'; holdStart=null; updateUI();
+    speakOnce('start_camera',true);
+    setInstruction('카메라만 켜졌습니다','지금은 미리보기/보정 모드입니다. 물방울은 나타나지 않습니다. ③·④ 보정 후 ⑤ 훈련 시작을 누르세요.','ready');
+    log('카메라만 켜졌습니다. 아직 훈련은 시작되지 않았습니다. 이 상태에서는 물방울을 생성하지 않습니다. 손 편/쥔 상태 보정 완료 후 ⑤ 훈련 시작 버튼을 누르세요.');
+    renderLoop();
   }catch(e){ console.error(e); setInstruction('카메라 또는 모델을 시작할 수 없습니다','HTTPS 접속, 카메라 권한, 브라우저를 확인하세요.','bad'); log(String(e)); }
 }
-function stopApp(){ running=false; paused=false; if(animationId) cancelAnimationFrame(animationId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null; setInstruction('카메라가 정지되었습니다','다시 시작하려면 카메라/모델 시작을 누르세요.','info'); }
+function stopApp(){ running=false; cameraOnlyReady=false; trainingActive=false; paused=false; calMode=null; target=null; if(animationId) cancelAnimationFrame(animationId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null; state='idle'; stage='idle'; setInstruction('카메라가 정지되었습니다','다시 시작하려면 카메라 켜기 버튼을 누르세요.','info'); updateUI(); }
+function startTraining(){
+  if(!running || !cameraOnlyReady){
+    setInstruction('먼저 ① 카메라만 켜기를 누르세요','카메라 미리보기와 손 인식이 준비된 뒤 보정과 훈련을 진행하세요.','warn');
+    speakText('need_camera_train','먼저 카메라만 켜기 버튼을 누르세요. 카메라가 켜진 뒤 보정과 훈련을 시작할 수 있습니다.',true);
+    return;
+  }
+  if(calMode){
+    setInstruction('보정이 진행 중입니다','보정이 끝난 뒤 ⑤ 훈련 시작 버튼을 누르세요.','warn');
+    speakText('wait_cal_done','보정이 진행 중입니다. 보정이 끝난 뒤 훈련 시작 버튼을 누르세요.',true);
+    return;
+  }
+  if(!openMetrics || !closeMetrics){
+    setInstruction('먼저 손 보정을 완료하세요','③ 손 편 상태 보정과 ④ 쥔/집은 상태 보정을 모두 완료해야 훈련을 시작합니다.','warn');
+    speakText('need_calibration_before_train','훈련을 시작하기 전에 손 편 상태 보정과 쥔 상태 보정을 모두 완료해 주세요.', true);
+    return;
+  }
+  paused=false;
+  trainingActive=true;
+  target=null;
+  particles=[];
+  resetGame(true);
+  speakOnce('training_start', true);
+}
+function abortTraining(){
+  if(!running){ setInstruction('카메라가 꺼져 있습니다','카메라 켜기 버튼으로 다시 시작할 수 있습니다.','info'); return; }
+  trainingActive=false; paused=false; target=null; particles=[]; stage='camera_only_ready'; state='camera_only_ready'; holdStart=null; overlapStart=null; reactionStart=null; successLock=false; resetBubbleOpenGate(); updateUI();
+  setInstruction('훈련을 중단했습니다','카메라는 켜진 상태입니다. 다른 옵션을 선택하거나 보정을 다시 한 뒤 ⑤ 훈련 시작을 누르세요.','warn');
+  speakOnce('training_abort', true);
+}
 function resetGame(announce=true){
+  trainingActive=true; paused=false;
   score=0; attempts=0; successes=0; failureCount=0; reactionTimes=[]; successTimes=[]; target=null; stage='none'; holdStart=null; overlapStart=null; reactionStart=null; particles=[]; gameStartTime=now(); state='waiting_hand'; ui.downloadArea.innerHTML=''; neutralTilt=null; successLock=false; targetSerial=0; lastStepId=''; stepStartedAt=now(); lastFailureAt=0; resetBubbleOpenGate(); updateUI(); spawnTaskTarget();
   if(announce){
     speakText('task_intro_'+targetSerial, taskIntroText(), true);
@@ -661,11 +701,12 @@ function calibrationRequiredNotice(){
 
 function startCalibration(mode){
   if(!running){
-    setInstruction('먼저 카메라/모델을 시작하세요','손 보정은 손 landmark가 인식된 뒤 시행할 수 있습니다.','warn');
+    setInstruction('먼저 카메라를 켜세요','손 보정은 손 landmark가 인식된 뒤 시행할 수 있습니다.','warn');
     speakText('cal_need_camera', '먼저 카메라와 모델을 시작한 뒤 손 보정을 진행하세요.', true);
     return;
   }
-  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; state=mode==='open'?'cal_open':'cal_close'; ui.calFill.style.width='0%';
+  trainingActive=false; paused=false; target=null; stage='calibration'; holdStart=null; resetBubbleOpenGate();
+  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; state=mode==='open'?'cal_open':'cal_close'; ui.calFill.style.width='0%'; updateUI();
   if(mode==='open') speakOnce('open_cal_start',true); else speakOnce('close_cal_start',true);
   const title = mode==='open' ? '손 편 상태 보정 중' : (CONFIG.exercise.gesture==='pinch'?'집기 상태 보정 중':'쥔 상태 보정 중');
   const detail = mode==='open'
@@ -1076,6 +1117,14 @@ function processGame(m,handed,handScore){
   ui.hand.textContent=`${handed} (${Math.round(100*handScore)}%)`;
   updateGestureDisplay(m);
   if(calMode){ processCalibration(m); return; }
+  if(!trainingActive){
+    target=null; particles=[];
+    if(!calMode && state!=='camera_only_ready'){
+      state='camera_only_ready'; stage='camera_only_ready';
+      setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ⑤ 훈련 시작 버튼을 눌러야 물방울이 나타납니다.','ready');
+    }
+    return;
+  }
   const type=CONFIG.exercise.taskType;
   if(!target) spawnTaskTarget();
   if(type==='bubble') processBubble(m); else if(type==='cup_drink') processCupDrink(m); else if(type==='hand_bubbles') processHandBubbles(m); else processBubble(m);
@@ -1105,13 +1154,13 @@ function processCalibration(m){
       : `쥔 상태 보정이 완료되었습니다. 2초 평균값 ${avg.fingertipAvg.toFixed(2)}를 쥔 기준으로 저장했습니다.`;
     const warnText = (openMetrics && closeMetrics && openMetrics.fingertipAvg <= closeMetrics.fingertipAvg + 0.08) ? ' 손 편 기준과 쥔 기준의 차이가 작습니다. 환자분이 가능한 범위에서 다시 보정하는 것이 좋습니다.' : '';
     speakText('cal_done_'+savedMode, resultText + warnText, true);
-    setInstruction('보정이 완료되었습니다', `${resultText}${warnText} 훈련 목표로 손을 이동하세요.`, 'ready');
-    state='waiting_hand';
+    setInstruction('보정이 완료되었습니다', `${resultText}${warnText} 처음 실행 화면으로 돌아왔습니다. ⑤ 훈련 시작 버튼을 눌러야 물방울 과제가 시작됩니다.`, 'ready');
+    state='camera_only_ready'; stage='camera_only_ready'; trainingActive=false; target=null; particles=[];
   }
 }
 function completeGame(){
   if(state==='complete') return;
-  state='complete'; stage='complete'; paused=true;
+  state='complete'; stage='complete'; trainingActive=false; paused=true;
   const totalSec=(now()-gameStartTime)/1000;
   const meanRt=mean(reactionTimes);
   const failCount=failureCount;
@@ -1326,19 +1375,20 @@ function renderLoop(){
   }catch(e){ console.error(e); log(String(e)); }
 }
 function bindButtons(){
-  window.startApp = startApp;
+  window.startCameraOnly = startCameraOnly;
   window.unlockAudio = unlockAudio;
   window.stopApp = stopApp;
-  btn.start.onclick = startApp;
+  btn.camera.onclick = startCameraOnly;
   btn.sound.onclick = unlockAudio;
   btn.openCal.onclick = () => startCalibration('open');
   btn.closeCal.onclick = () => startCalibration('close');
-  btn.reset.onclick = () => resetGame(true);
-  btn.pause.onclick = () => { paused=!paused; btn.pause.textContent=paused?'재개':'일시정지'; speakOnce(paused?'pause':'resume',true); };
+  btn.train.onclick = startTraining;
+  btn.abort.onclick = abortTraining;
+  btn.pause.onclick = () => { if(!trainingActive){ speakText('pause_only_training','일시정지는 훈련 중에만 사용합니다.',true); return; } paused=!paused; btn.pause.textContent=paused?'재개':'일시정지'; speakOnce(paused?'pause':'resume',true); };
   btn.stop.onclick = stopApp;
 }
 bindButtons();
-setInstruction('카메라/모델 시작을 누르세요','버튼을 눌렀을 때 문구가 바뀌면 버튼 입력은 정상입니다. 모델 로딩 오류가 있으면 화면에 표시됩니다.','info');
+setInstruction('① 카메라만 켜기를 누르세요','카메라 버튼은 미리보기와 손 인식만 시작합니다. 물방울은 ⑤ 훈련 시작을 누른 뒤에만 나타납니다.','info');
 updateCalibrationStatus();
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>

@@ -2,62 +2,101 @@ name: Wake Up Streamlit App
 
 on:
   schedule:
-    # 4시간마다 실행 (UTC 기준 0, 4, 8, 12, 16, 20시)
-    - cron: "0 */4 * * *"
+    # 4시간마다 실행, UTC 기준
+    # 한국시간 기준 대략 02:17, 06:17, 10:17, 14:17, 18:17, 22:17
+    - cron: "17 */4 * * *"
   workflow_dispatch:
 
 jobs:
   wake-up:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
 
+    steps:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Install Playwright
         run: |
           pip install playwright
           playwright install chromium
 
-      - name: Run Sleep-Prevention Script
+      - name: Wake Streamlit App
         run: |
-          python -c "
+          python - <<'PY'
+          import re
           import time
-          from playwright.sync_api import sync_playwright
+          from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
-          URL = 'https://hand_training.streamlit.app'
+          APP_URL = "https://handtraining.streamlit.app"
 
           with sync_playwright() as p:
               browser = p.chromium.launch(headless=True)
-              page = browser.new_page()
-              
-              print(f'{URL} 접속 중...')
-              # 타임아웃을 60초로 늘려 부팅 대기
-              page.goto(URL, timeout=60000)
-              
-              # 1. '앱 깨우기' 버튼이 있는지 확인 (대소문자/띄어쓰기 무관하게 포괄적 검색)
-              wakeup_button = page.locator('button', has_text='get this app back up')
-              if wakeup_button.count() > 0:
-                  print('절전 모드 감지! 깨우기 버튼을 클릭합니다.')
-                  wakeup_button.click()
-                  # 클릭 후 서버가 재시작될 때까지 충분히 대기 (30초)
-                  time.sleep(30)
-              
-              # 2. Streamlit 앱이 정상적으로 렌더링(웹소켓 연결)되었는지 확인
-              # '가상 검사결과표' 또는 '사례 학습 모드' 텍스트가 화면에 뜰 때까지 대기
-              try:
-                  page.wait_for_selector('text=사례 학습 모드', timeout=30000)
-                  print('앱이 정상적으로 활성화되었습니다 (웹소켓 연결 완료).')
-                  time.sleep(10) # 봇이 10초간 화면에 머물며 활성 상태 유지
-              except Exception as e:
-                  print('경고: 앱이 완전히 로딩되지 않았을 수 있습니다.', e)
-                  
-              browser.close()
-          "
+              page = browser.new_page(
+                  viewport={"width": 1280, "height": 900},
+                  user_agent=(
+                      "Mozilla/5.0 (X11; Linux x86_64) "
+                      "AppleWebKit/537.36 (KHTML, like Gecko) "
+                      "Chrome/120.0.0.0 Safari/537.36"
+                  ),
+              )
 
-      - name: Keepalive Workflow
-        uses: gautamkrishnar/keepalive-workflow@v2
+              print(f"Streamlit 앱 접속 중: {APP_URL}")
+
+              try:
+                  page.goto(APP_URL, timeout=120000, wait_until="domcontentloaded")
+              except Exception as e:
+                  print("초기 접속 중 경고:", e)
+
+              # Streamlit 절전 화면이 뜨면 깨우기 버튼 클릭
+              wake_button_patterns = [
+                  re.compile("yes, get this app back up", re.I),
+                  re.compile("get this app back up", re.I),
+                  re.compile("wake", re.I),
+              ]
+
+              clicked = False
+              for pattern in wake_button_patterns:
+                  try:
+                      button = page.get_by_role("button", name=pattern)
+                      if button.count() > 0:
+                          print("절전 모드 감지: 깨우기 버튼 클릭")
+                          button.first.click()
+                          clicked = True
+                          time.sleep(45)
+                          break
+                  except Exception:
+                      pass
+
+              if not clicked:
+                  print("절전 모드 버튼은 보이지 않음. 앱 로딩 확인으로 진행합니다.")
+
+              # 현재 손 기능 재활 앱에서 확인할 수 있는 실제 문구
+              app_markers = [
+                  "손 기능 재활",
+                  "카메라만 켜기",
+                  "훈련 시작",
+                  "손가락 동작 보정",
+              ]
+
+              loaded = False
+              for marker in app_markers:
+                  try:
+                      page.wait_for_selector(f"text={marker}", timeout=45000)
+                      print(f"앱 활성화 확인: '{marker}' 텍스트 감지")
+                      loaded = True
+                      break
+                  except PlaywrightTimeoutError:
+                      continue
+
+              if not loaded:
+                  print("경고: 앱 UI 텍스트를 확인하지 못했습니다.")
+                  print("현재 페이지 제목:", page.title())
+                  print("현재 URL:", page.url)
+              else:
+                  print("앱이 정상적으로 활성화되었습니다.")
+                  time.sleep(20)
+
+              browser.close()
+          PY

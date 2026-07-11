@@ -75,8 +75,8 @@ EXERCISES = {
         "label": "가상 물컵에 물 따르고 잡고 마시기",
         "taskType": "pour_drink",
         "gesture": "grasp",
-        "targetName": "주전자/물컵",
-        "description": "주전자를 잡아 컵 위로 옮겨 기울여 물을 따른 뒤, 컵을 잡고 입 위치로 가져가면 성공합니다.",
+        "targetName": "물병/물컵",
+        "description": "물병을 잡아 컵 위로 옮겨 기울여 물을 따른 뒤, 컵을 잡고 입 위치로 가져가면 성공합니다.",
         "clinicalGoal": "잡기, 전완/손목 조절, 목표 지향 이동, 마시기 ADL 순차 과제",
     },
 }
@@ -353,7 +353,7 @@ const messages = {
   open_cal_start:'손을 최대한 편 상태로 유지하세요.', close_cal_start: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞댄 상태로 유지하세요.' : '손을 쥐는 상태로 유지하세요.', cal_done:'보정이 완료되었습니다.',
   seek_target:'목표 위치로 손을 가져가세요.', now_gesture: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞대어 집으세요.' : (CONFIG.exercise.gesture==='open' ? '손을 충분히 펴세요.' : '손을 쥐세요.'), hold_gesture:'끝동작을 잠시 유지하세요.', success:'성공입니다. 다음 목표로 이동하세요.', complete:'훈련이 끝났습니다. 결과를 확인하세요.',
   cup_reach:'물컵으로 손을 가져가세요.', cup_grasp:'물컵을 잡으세요.', cup_to_mouth:'물컵을 입 위치 목표까지 천천히 옮기세요.', cup_drink_hold:'입 위치에서 잠시 멈추세요.',
-  pour_reach_pitcher:'주전자로 손을 가져가세요.', pour_grasp_pitcher:'주전자를 잡으세요.', pour_move_to_cup:'주전자를 컵 위로 옮기세요.', pour_tilt:'손목을 기울여 물을 따르는 자세를 유지하세요.', pour_done:'물이 채워졌습니다. 이제 물컵을 잡으세요.',
+  pour_reach_pitcher:'물병으로 손을 가져가세요.', pour_grasp_pitcher:'물병을 잡으세요.', pour_move_to_cup:'물병을 컵 위로 옮기세요.', pour_tilt:'손목을 기울여 물을 따르는 자세를 유지하세요.', pour_done:'물이 채워졌습니다. 이제 물컵을 잡으세요.',
   pause:'훈련을 일시정지합니다.', resume:'훈련을 다시 시작합니다.'
 };
 
@@ -550,12 +550,12 @@ function processPourDrink(m){
   if(stage==='pour_reach_pitcher'){
     if(!insidePoint(c,p,1.08)){ resetHold(); speakOnce('pour_reach_pitcher'); setInstruction('주전자로 손을 가져가세요','손바닥 중심이 주전자 손잡이 영역에 들어가도록 이동합니다.','info'); return; }
     if(!g){ resetHold(); speakOnce('pour_grasp_pitcher'); setInstruction('주전자를 잡으세요','손을 쥐어 주전자를 잡습니다.','action'); return; }
-    beginHold(); setInstruction('주전자를 잡은 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn'); if(holdProgress()>=1){ p.attached=true; stage='pour_move_to_cup'; neutralTilt=m.angle; resetHold(); speakOnce('pour_move_to_cup',true); }
+    beginHold(); setInstruction('물병을 잡은 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn'); if(holdProgress()>=1){ p.attached=true; stage='pour_move_to_cup'; neutralTilt=m.angle; resetHold(); speakOnce('pour_move_to_cup',true); }
     return;
   }
   if(stage==='pour_move_to_cup'){
     p.x=c.x; p.y=c.y;
-    if(!insidePoint(c,cup,1.15)){ resetHold(); setInstruction('주전자를 컵 위로 옮기세요','컵 위 목표 영역까지 이동합니다.','drink'); return; }
+    if(!insidePoint(c,cup,1.15)){ resetHold(); setInstruction('물병을 컵 위로 옮기세요','컵 위 목표 영역까지 이동합니다.','drink'); return; }
     const tilt=Math.abs(angleDelta(m.angle, neutralTilt||m.angle));
     if(tilt < CONFIG.levelConfig.tiltDeg){ resetHold(); speakOnce('pour_tilt'); setInstruction('손목을 기울여 물을 따르세요',`기울임 ${tilt.toFixed(0)}° / 목표 ${CONFIG.levelConfig.tiltDeg}°`, 'action'); return; }
     beginHold(); setInstruction('물을 따르는 자세를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn'); if(holdProgress()>=1){ cup.filled=true; p.attached=false; stage='cup_reach'; resetHold(); speakOnce('pour_done',true); }
@@ -596,10 +596,149 @@ function drawScene(handData,m){
   if(state==='complete'){ ctx.fillStyle='rgba(0,0,0,.58)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#33d17a'; ctx.font='bold 44px sans-serif'; ctx.textAlign='center'; ctx.fillText('훈련 완료',canvas.width/2,canvas.height/2-20); ctx.fillStyle='#fff'; ctx.font='24px sans-serif'; ctx.fillText(`성공 ${successes}/${CONFIG.targetCount}`,canvas.width/2,canvas.height/2+25); }
 }
 function drawGuide(){ ctx.strokeStyle='rgba(255,255,255,.33)'; ctx.lineWidth=2; ctx.setLineDash([8,8]); ctx.beginPath(); ctx.moveTo(canvas.width/2,0); ctx.lineTo(canvas.width/2,canvas.height); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,canvas.height/2); ctx.lineTo(canvas.width,canvas.height/2); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='rgba(87,166,255,.10)'; ctx.fillRect(canvas.width*.12,canvas.height*.10,canvas.width*.76,canvas.height*.80); }
-function drawBubble(o){ if(!o)return; const grad=ctx.createRadialGradient(o.x-o.r*.25,o.y-o.r*.35,o.r*.1,o.x,o.y,o.r); grad.addColorStop(0,'rgba(255,255,255,.95)'); grad.addColorStop(.25,'rgba(130,210,255,.85)'); grad.addColorStop(1,'rgba(32,137,255,.55)'); ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='rgba(255,255,255,.75)'; ctx.lineWidth=3; ctx.stroke(); }
-function drawCup(o,filled=false,label='컵'){ if(!o)return; ctx.fillStyle=filled?'rgba(87,166,255,.65)':'rgba(255,255,255,.18)'; ctx.strokeStyle='rgba(255,255,255,.85)'; ctx.lineWidth=4; ctx.beginPath(); ctx.roundRect(o.x-o.r*.62,o.y-o.r*.62,o.r*1.24,o.r*1.20,12); ctx.fill(); ctx.stroke(); if(filled){ ctx.fillStyle='rgba(80,200,255,.72)'; ctx.fillRect(o.x-o.r*.50,o.y,o.r, o.r*.42); } ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText(label,o.x,o.y+o.r*.95); }
-function drawPitcher(o){ if(!o)return; ctx.fillStyle='rgba(255,209,102,.28)'; ctx.strokeStyle='rgba(255,231,166,.90)'; ctx.lineWidth=4; ctx.beginPath(); ctx.roundRect(o.x-o.r*.55,o.y-o.r*.56,o.r*1.05,o.r*1.05,14); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.arc(o.x+o.r*.62,o.y,o.r*.28,-Math.PI/2,Math.PI/2); ctx.stroke(); ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText('주전자',o.x,o.y+o.r*.95); }
-function drawMouth(o){ if(!o)return; ctx.fillStyle='rgba(96,230,255,.22)'; ctx.strokeStyle='rgba(96,230,255,.92)'; ctx.lineWidth=4; ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText('입 위치',o.x,o.y+5); }
+function drawBubble(o){
+  if(!o)return;
+  // 실제 물방울처럼 보이도록 원형 대신 위가 좁고 아래가 둥근 물방울 벡터 형태로 표현
+  const r=o.r, x=o.x, y=o.y;
+  ctx.save();
+  ctx.shadowColor='rgba(50,180,255,.35)';
+  ctx.shadowBlur=14;
+  const grad=ctx.createRadialGradient(x-r*.28,y-r*.42,r*.08,x,y,r*1.10);
+  grad.addColorStop(0,'rgba(255,255,255,.98)');
+  grad.addColorStop(.22,'rgba(167,229,255,.94)');
+  grad.addColorStop(.62,'rgba(59,167,255,.78)');
+  grad.addColorStop(1,'rgba(0,96,210,.58)');
+  ctx.fillStyle=grad;
+  ctx.beginPath();
+  ctx.moveTo(x, y-r*1.12);
+  ctx.bezierCurveTo(x-r*.72, y-r*.20, x-r*.84, y+r*.42, x, y+r*.86);
+  ctx.bezierCurveTo(x+r*.84, y+r*.42, x+r*.72, y-r*.20, x, y-r*1.12);
+  ctx.closePath();
+  ctx.fill();
+  ctx.lineWidth=Math.max(2,r*.045);
+  ctx.strokeStyle='rgba(230,250,255,.92)';
+  ctx.stroke();
+  // 하이라이트
+  ctx.shadowBlur=0;
+  ctx.fillStyle='rgba(255,255,255,.78)';
+  ctx.beginPath();
+  ctx.ellipse(x-r*.27,y-r*.35,r*.16,r*.29,-0.45,0,Math.PI*2);
+  ctx.fill();
+  ctx.fillStyle='rgba(255,255,255,.42)';
+  ctx.beginPath();
+  ctx.ellipse(x+r*.20,y+r*.18,r*.25,r*.12,0.35,0,Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+function drawCup(o,filled=false,label='물컵'){
+  if(!o)return;
+  const x=o.x, y=o.y, r=o.r;
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=10; ctx.shadowOffsetY=4;
+  // 컵 외곽: 실제 유리컵처럼 위가 넓고 아래가 좁은 사다리꼴
+  const topW=r*1.18, botW=r*.72, h=r*1.42;
+  const topY=y-h*.55, botY=y+h*.52;
+  const glassGrad=ctx.createLinearGradient(x-topW/2,topY,x+topW/2,botY);
+  glassGrad.addColorStop(0,'rgba(255,255,255,.40)');
+  glassGrad.addColorStop(.35,'rgba(210,240,255,.18)');
+  glassGrad.addColorStop(1,'rgba(255,255,255,.28)');
+  ctx.fillStyle=glassGrad;
+  ctx.strokeStyle='rgba(240,250,255,.94)';
+  ctx.lineWidth=Math.max(3,r*.045);
+  ctx.beginPath();
+  ctx.moveTo(x-topW/2, topY);
+  ctx.lineTo(x-botW/2, botY);
+  ctx.quadraticCurveTo(x, botY+r*.10, x+botW/2, botY);
+  ctx.lineTo(x+topW/2, topY);
+  ctx.quadraticCurveTo(x, topY-r*.08, x-topW/2, topY);
+  ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  // 컵 입구 타원
+  ctx.fillStyle='rgba(255,255,255,.24)';
+  ctx.beginPath(); ctx.ellipse(x,topY,topW/2,r*.13,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // 물
+  if(filled){
+    const waterY=y+h*.05;
+    const waterGrad=ctx.createLinearGradient(x,waterY,x,botY);
+    waterGrad.addColorStop(0,'rgba(95,210,255,.76)');
+    waterGrad.addColorStop(1,'rgba(0,120,230,.72)');
+    ctx.fillStyle=waterGrad;
+    ctx.beginPath();
+    ctx.moveTo(x-topW*.39, waterY);
+    ctx.quadraticCurveTo(x,waterY-r*.05,x+topW*.39,waterY);
+    ctx.lineTo(x+botW*.42,botY-r*.08);
+    ctx.quadraticCurveTo(x,botY+r*.02,x-botW*.42,botY-r*.08);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle='rgba(180,240,255,.65)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(x,waterY,topW*.39,r*.08,0,0,Math.PI*2); ctx.stroke();
+  }
+  // 유리 하이라이트
+  ctx.strokeStyle='rgba(255,255,255,.65)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(x-topW*.25,topY+r*.18); ctx.lineTo(x-botW*.16,botY-r*.18); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(x+topW*.18,topY+r*.24); ctx.lineTo(x+botW*.12,botY-r*.25); ctx.stroke();
+  ctx.shadowBlur=0; ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,r*.18)}px sans-serif`; ctx.textAlign='center';
+  ctx.fillText(label,x,y+r*1.02);
+  ctx.restore();
+}
+function drawPitcher(o){
+  if(!o)return;
+  // 실제 물병 모양: 캡, 목, 몸통, 라벨, 물의 양을 표현
+  const x=o.x, y=o.y, r=o.r;
+  const tilt=o.attached ? -0.28 : 0;
+  ctx.save();
+  ctx.translate(x,y); ctx.rotate(tilt);
+  ctx.shadowColor='rgba(0,0,0,.35)'; ctx.shadowBlur=10; ctx.shadowOffsetY=4;
+  // 물병 몸통
+  const w=r*.92, h=r*1.70;
+  const bodyY=-h*.18;
+  const bottleGrad=ctx.createLinearGradient(-w/2,bodyY-h/2,w/2,bodyY+h/2);
+  bottleGrad.addColorStop(0,'rgba(255,255,255,.42)');
+  bottleGrad.addColorStop(.42,'rgba(170,220,255,.20)');
+  bottleGrad.addColorStop(1,'rgba(255,255,255,.30)');
+  ctx.fillStyle=bottleGrad;
+  ctx.strokeStyle='rgba(235,250,255,.92)';
+  ctx.lineWidth=Math.max(3,r*.045);
+  ctx.beginPath();
+  ctx.roundRect(-w/2, bodyY-h*.34, w, h*.98, r*.18);
+  ctx.fill(); ctx.stroke();
+  // 목
+  ctx.fillStyle='rgba(230,250,255,.30)';
+  ctx.beginPath(); ctx.roundRect(-w*.20, bodyY-h*.60, w*.40, h*.34, r*.09); ctx.fill(); ctx.stroke();
+  // 캡
+  ctx.fillStyle='rgba(50,130,255,.85)'; ctx.strokeStyle='rgba(190,225,255,.95)';
+  ctx.beginPath(); ctx.roundRect(-w*.25, bodyY-h*.73, w*.50, h*.14, r*.05); ctx.fill(); ctx.stroke();
+  // 내부 물
+  ctx.fillStyle='rgba(75,190,255,.58)';
+  ctx.beginPath(); ctx.roundRect(-w*.40, bodyY+h*.10, w*.80, h*.42, r*.12); ctx.fill();
+  // 라벨
+  ctx.fillStyle='rgba(255,255,255,.82)'; ctx.beginPath(); ctx.roundRect(-w*.45, bodyY-h*.02, w*.90, h*.23, r*.08); ctx.fill();
+  ctx.fillStyle='#1263b0'; ctx.font=`bold ${Math.max(12,r*.16)}px sans-serif`; ctx.textAlign='center'; ctx.fillText('WATER',0,bodyY+h*.125);
+  // 하이라이트
+  ctx.strokeStyle='rgba(255,255,255,.62)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(-w*.28,bodyY-h*.25); ctx.lineTo(-w*.28,bodyY+h*.42); ctx.stroke();
+  // 따르는 물줄기: 컵 위로 옮긴 뒤 기울이는 단계에서 시각화
+  if(o.attached){
+    ctx.strokeStyle='rgba(104,220,255,.75)'; ctx.lineWidth=Math.max(3,r*.055); ctx.setLineDash([8,8]);
+    ctx.beginPath(); ctx.moveTo(w*.45,bodyY-h*.48); ctx.quadraticCurveTo(w*.85,bodyY-h*.10,w*.72,bodyY+h*.28); ctx.stroke(); ctx.setLineDash([]);
+  }
+  ctx.shadowBlur=0; ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,r*.17)}px sans-serif`; ctx.textAlign='center';
+  ctx.fillText('물병',0,r*1.13);
+  ctx.restore();
+}
+function drawMouth(o){
+  if(!o)return;
+  const x=o.x,y=o.y,r=o.r;
+  ctx.save();
+  ctx.fillStyle='rgba(96,230,255,.18)'; ctx.strokeStyle='rgba(96,230,255,.92)'; ctx.lineWidth=4;
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  // 얼굴/입 목표 아이콘
+  ctx.fillStyle='rgba(255,255,255,.86)';
+  ctx.beginPath(); ctx.arc(x,y-r*.20,r*.28,0,Math.PI*2); ctx.fill();
+  ctx.strokeStyle='rgba(255,90,106,.95)'; ctx.lineWidth=3;
+  ctx.beginPath(); ctx.arc(x,y+r*.13,r*.28,0.15*Math.PI,0.85*Math.PI); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,r*.17)}px sans-serif`; ctx.textAlign='center'; ctx.fillText('입 위치',x,y+r*1.02);
+  ctx.restore();
+}
 function drawTargets(){ if(!target)return; if(target.kind==='bubble') drawBubble(target); if(target.cup) drawCup(target.cup,target.cup.filled,'물컵'); if(target.pitcher) drawPitcher(target.pitcher); if(target.mouth) drawMouth(target.mouth); }
 function drawParticles(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }
 function drawHand(lm){ const con=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.strokeStyle='rgba(51,209,122,.95)'; ctx.fillStyle='#33d17a'; ctx.lineWidth=3; for(const [a,b] of con){ ctx.beginPath(); ctx.moveTo(lm[a].x*canvas.width,lm[a].y*canvas.height); ctx.lineTo(lm[b].x*canvas.width,lm[b].y*canvas.height); ctx.stroke(); } for(let i=0;i<lm.length;i++){ const r=[4,8,12,16,20].includes(i)?6:4; ctx.beginPath(); ctx.arc(lm[i].x*canvas.width,lm[i].y*canvas.height,r,0,Math.PI*2); ctx.fill(); } }

@@ -275,8 +275,68 @@ HTML = r'''
   </div>
 </div>
 
-<script type="module">
-import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22";
+<script>
+let HandLandmarker = null;
+let FilesetResolver = null;
+let visionModuleUrl = '';
+let visionModulePromise = null;
+
+async function loadVisionModule(){
+  if(HandLandmarker && FilesetResolver) return true;
+  if(visionModulePromise) return visionModulePromise;
+  const candidates = [
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.21/vision_bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/vision_bundle.mjs',
+    'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision/vision_bundle.mjs',
+    'https://unpkg.com/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs?module'
+  ];
+  visionModulePromise = (async () => {
+    let lastErr = null;
+    for(const url of candidates){
+      try{
+        if(document.getElementById('modeLabel')) document.getElementById('modeLabel').textContent = 'MediaPipe 모듈 로딩 중';
+        const mod = await import(/* @vite-ignore */ url);
+        HandLandmarker = mod.HandLandmarker;
+        FilesetResolver = mod.FilesetResolver;
+        if(!HandLandmarker || !FilesetResolver) throw new Error('HandLandmarker 또는 FilesetResolver를 찾을 수 없습니다.');
+        visionModuleUrl = url;
+        if(document.getElementById('modeLabel')) document.getElementById('modeLabel').textContent = 'MediaPipe 모듈 준비됨';
+        return true;
+      }catch(e){
+        lastErr = e;
+        console.warn('MediaPipe module load failed:', url, e);
+      }
+    }
+    visionModulePromise = null;
+    throw new Error('MediaPipe Hands 모듈을 불러오지 못했습니다. 네트워크, CDN 차단, 브라우저 보안 설정을 확인하세요. 마지막 오류: ' + (lastErr?.message || lastErr));
+  })();
+  return visionModulePromise;
+}
+
+
+window.addEventListener('error', (event) => {
+  try{
+    const msg = event?.message || '알 수 없는 오류';
+    const box = document.getElementById('logBox');
+    const big = document.getElementById('bigInstruction');
+    const sub = document.getElementById('subInstruction');
+    if(big) big.textContent = '앱 실행 중 오류가 발생했습니다';
+    if(sub) sub.textContent = msg;
+    if(box) box.textContent = msg;
+  }catch(e){}
+});
+window.addEventListener('unhandledrejection', (event) => {
+  try{
+    const msg = String(event?.reason?.message || event?.reason || '비동기 오류');
+    const box = document.getElementById('logBox');
+    const big = document.getElementById('bigInstruction');
+    const sub = document.getElementById('subInstruction');
+    if(big) big.textContent = '모델 또는 카메라 로딩 오류';
+    if(sub) sub.textContent = msg;
+    if(box) box.textContent = msg;
+  }catch(e){}
+});
 
 const CONFIG = __CONFIG_JSON__;
 const AUDIO_ASSETS = CONFIG.audioAssets || {};
@@ -305,7 +365,7 @@ let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0
 let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundAt=0, neutralTilt=null;
 let particles=[];
 
-ui.modeLabel.textContent = `${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -357,9 +417,33 @@ function fallbackSpeechOrTone(text,key){
 async function startApp(){
   if(running) return;
   try{
-    setInstruction('모델을 불러오는 중입니다','잠시 기다려 주세요.','info');
-    const vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
-    handLandmarker = await HandLandmarker.createFromOptions(vision,{ baseOptions:{ modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task', delegate:'GPU'}, runningMode:'VIDEO', numHands:2, minHandDetectionConfidence:CONFIG.minHandConfidence, minHandPresenceConfidence:CONFIG.minHandConfidence, minTrackingConfidence:CONFIG.minHandConfidence });
+    setInstruction('버튼 입력이 확인되었습니다','MediaPipe Hands 모듈과 모델을 불러오는 중입니다. 잠시 기다려 주세요.','info');
+    log('카메라/모델 시작 버튼이 눌렸습니다. MediaPipe Hands 모듈을 불러오는 중입니다.');
+    await loadVisionModule();
+    const wasmBase = visionModuleUrl
+      ? visionModuleUrl.replace(/vision_bundle\.mjs(?:\?module)?$/, 'wasm')
+      : 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm';
+    const vision = await FilesetResolver.forVisionTasks(wasmBase);
+    const handOptions = (delegate) => ({
+      baseOptions:{
+        modelAssetPath:'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task',
+        delegate
+      },
+      runningMode:'VIDEO',
+      numHands:2,
+      minHandDetectionConfidence:CONFIG.minHandConfidence,
+      minHandPresenceConfidence:CONFIG.minHandConfidence,
+      minTrackingConfidence:CONFIG.minHandConfidence
+    });
+    try{
+      ui.modeLabel.textContent='모델 로딩 중: GPU';
+      handLandmarker = await HandLandmarker.createFromOptions(vision, handOptions('GPU'));
+    }catch(gpuErr){
+      console.warn('GPU delegate failed. Fallback to CPU.', gpuErr);
+      ui.modeLabel.textContent='모델 로딩 중: CPU';
+      handLandmarker = await HandLandmarker.createFromOptions(vision, handOptions('CPU'));
+    }
+    ui.modeLabel.textContent='카메라 권한 요청 중';
     stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:CONFIG.useFrontCamera?'user':'environment', width:{ideal:960}, height:{ideal:720}, frameRate:{ideal:24,max:30}}, audio:false });
     video.srcObject=stream; await video.play();
     canvas.width=video.videoWidth||960; canvas.height=video.videoHeight||720;
@@ -530,8 +614,20 @@ function renderLoop(){
     processGame(m,hand.handed,hand.score); drawScene(hand,m); updateUI();
   }catch(e){ console.error(e); log(String(e)); }
 }
-btn.start.addEventListener('click',startApp); btn.sound.addEventListener('click',unlockAudio); btn.openCal.addEventListener('click',()=>startCalibration('open')); btn.closeCal.addEventListener('click',()=>startCalibration('close')); btn.reset.addEventListener('click',()=>resetGame(true)); btn.pause.addEventListener('click',()=>{paused=!paused;btn.pause.textContent=paused?'재개':'일시정지';speakOnce(paused?'pause':'resume',true);}); btn.stop.addEventListener('click',stopApp);
-setInstruction('카메라/모델 시작을 누르세요','스마트폰에서는 소리 활성화/테스트를 먼저 누르면 안내가 더 안정적입니다.','info');
+function bindButtons(){
+  window.startApp = startApp;
+  window.unlockAudio = unlockAudio;
+  window.stopApp = stopApp;
+  btn.start.onclick = startApp;
+  btn.sound.onclick = unlockAudio;
+  btn.openCal.onclick = () => startCalibration('open');
+  btn.closeCal.onclick = () => startCalibration('close');
+  btn.reset.onclick = () => resetGame(true);
+  btn.pause.onclick = () => { paused=!paused; btn.pause.textContent=paused?'재개':'일시정지'; speakOnce(paused?'pause':'resume',true); };
+  btn.stop.onclick = stopApp;
+}
+bindButtons();
+setInstruction('카메라/모델 시작을 누르세요','버튼을 눌렀을 때 문구가 바뀌면 버튼 입력은 정상입니다. 모델 로딩 오류가 있으면 화면에 표시됩니다.','info');
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>
 </body>

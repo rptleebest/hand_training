@@ -158,7 +158,7 @@ with st.sidebar:
     step_timeout_sec = st.slider("단계별 재시도 안내 시간(초)", min_value=10, max_value=60, value=30, step=5)
     gesture_threshold = st.slider("손동작 인정 기준", min_value=0.05, max_value=0.95, value=float(level_cfg["gestureThreshold"]), step=0.05)
     target_size_scale = st.slider("물방울/공기방울/물컵 크기 보정", min_value=0.60, max_value=1.80, value=1.00, step=0.05)
-    speed_scale = st.slider("물방울/공기방울/물컵 속도 보정", min_value=0.00, max_value=2.50, value=1.00, step=0.10)
+    speed_scale = st.slider("물방울/공기방울/물컵 속도 보정", min_value=0.00, max_value=6.00, value=1.00, step=0.25, help="0은 정지, 1은 표준 속도, 6은 빠른 이동입니다. v12에서는 속도 차이가 확실히 보이도록 비선형으로 적용됩니다.")
     st.divider()
     robustness = st.slider("손 떨림 보정/움직임 안정화", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
     min_hand_conf = st.slider("손 인식 최소 신뢰도", min_value=0.20, max_value=0.80, value=0.45, step=0.05)
@@ -362,9 +362,9 @@ const messages = {
   hand_not_found:'손이 보이지 않습니다. 손 전체가 화면에 들어오도록 조정하세요.',
   wrong_hand:'선택한 손이 아닙니다. 훈련 손을 다시 확인하세요.',
   low_quality:'손 인식이 불안정합니다. 조명을 밝게 하고 손 가림을 줄여 주세요.',
-  open_cal_start:'손을 최대한 편 상태로 유지하세요.',
-  close_cal_start: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞댄 상태로 유지하세요.' : '손을 쥐는 상태로 유지하세요.',
-  cal_done:'보정이 완료되었습니다.',
+  open_cal_start:'손 편 상태 보정을 시작합니다. 환자분은 가능한 범위에서 손가락을 최대한 펴고, 2초 동안 그대로 유지하세요. 지금부터 평균값을 측정합니다.',
+  close_cal_start: CONFIG.exercise.gesture==='pinch' ? '집기 상태 보정을 시작합니다. 엄지와 검지를 가능한 범위에서 맞대고, 2초 동안 그대로 유지하세요. 지금부터 평균값을 측정합니다.' : '쥔 상태 보정을 시작합니다. 환자분은 가능한 범위에서 손가락을 굽혀 손을 쥐고, 2초 동안 그대로 유지하세요. 지금부터 평균값을 측정합니다.',
+  cal_done:'보정이 완료되었습니다. 방금 2초 동안 측정한 평균값을 환자분의 기준점으로 저장했습니다.',
 
   seek_target:'목표 위치로 손을 가져가세요.',
   now_gesture: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞대어 집으세요.' : (CONFIG.exercise.gesture==='open' ? '손을 충분히 펴세요.' : '손을 쥐세요.'),
@@ -393,7 +393,7 @@ let state='idle', score=0, attempts=0, successes=0, failureCount=0, reactionTime
 let target=null, stage='none', holdStart=null, overlapStart=null, reactionStart=null, lastStatusVoice=0;
 let targetSerial=0, lastStepId='', stepStartedAt=0, lastFailureAt=0;
 let bubbleOpenReady=false, bubbleOpenStart=0, bubbleCandidateId=null;
-let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0;
+let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0, calVoiceMilestone=-1;
 let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundAt=0, neutralTilt=null;
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
@@ -436,12 +436,36 @@ function splitSpeechText(text){
 function primeSpeechSynthesis(){
   if(!('speechSynthesis' in window)){ updateVoiceStatus('음성합성 없음'); return false; }
   try{
-    window.speechSynthesis.cancel();
     window.speechSynthesis.resume();
     const voice=pickKoreanVoice();
     updateVoiceStatus(voice ? `음성 준비: ${voice.lang || 'voice'}` : '음성 준비 중');
     return true;
   }catch(e){ updateVoiceStatus('음성 준비 실패'); return false; }
+}
+function makeUtterance(text, key='voice'){
+  const u=new SpeechSynthesisUtterance(String(text||''));
+  u.lang='ko-KR'; u.rate=.80; u.pitch=1.0; u.volume=1.0;
+  const voice=pickKoreanVoice();
+  if(voice) u.voice=voice;
+  u.onstart=()=>updateVoiceStatus('음성 안내 중');
+  u.onerror=(e)=>{ console.warn('speech error',e); updateVoiceStatus('음성 오류'); toneFor(key); };
+  return u;
+}
+function directSpeak(text, key='voice'){
+  if(CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only') return false;
+  if(!('speechSynthesis' in window)){ updateVoiceStatus('음성합성 없음'); return false; }
+  try{
+    window.speechSynthesis.cancel();
+    speechQueue=[]; speechActive=false;
+    window.speechSynthesis.resume();
+    const u=makeUtterance(text,key);
+    u.onend=()=>{ speechActive=false; updateVoiceStatus('활성화됨'); setTimeout(drainSpeechQueue,160); };
+    speechActive=true;
+    window.speechSynthesis.speak(u);
+    setTimeout(()=>{ try{ window.speechSynthesis.resume(); }catch(e){} },350);
+    setTimeout(()=>{ try{ window.speechSynthesis.resume(); }catch(e){} },1200);
+    return true;
+  }catch(e){ console.warn('directSpeak failed',e); updateVoiceStatus('음성 실패'); toneFor(key); return false; }
 }
 if('speechSynthesis' in window){
   window.speechSynthesis.onvoiceschanged = () => { pickKoreanVoice(); updateVoiceStatus(selectedKoreanVoice ? `음성 준비: ${selectedKoreanVoice.lang || 'voice'}` : '음성 준비'); };
@@ -456,8 +480,9 @@ async function unlockAudio(){
     primeSpeechSynthesis();
     beep(660,.08,.06); setTimeout(()=>beep(880,.08,.06),110);
     setInstruction('소리 안내가 활성화되었습니다','훈련 설명과 단계 안내가 음성으로 출력됩니다. 들리지 않으면 미디어 볼륨과 무음모드를 확인하세요.','ready');
-    speakText('sound_test','소리 안내가 활성화되었습니다. 이제 화면 안내와 음성 안내에 따라 천천히 훈련하세요.',true);
-    updateVoiceStatus('활성화됨');
+    const ok = directSpeak('소리 안내가 활성화되었습니다. 이제 화면 안내와 음성 안내에 따라 천천히 훈련하세요.', 'sound_test');
+    if(!ok) speakText('sound_test','소리 안내가 활성화되었습니다. 이제 화면 안내와 음성 안내에 따라 천천히 훈련하세요.',true);
+    updateVoiceStatus(ok?'음성 테스트 중':'활성화됨');
   }catch(e){ updateVoiceStatus('차단됨'); setInstruction('소리 활성화가 제한되었습니다','무음모드, 미디어 볼륨, 브라우저 자동재생 제한을 확인하세요.','warn'); }
 }
 function beep(freq=660,duration=.12,vol=.08){
@@ -515,10 +540,7 @@ function drainSpeechQueue(){
   try{
     if(!soundUnlocked){ speechActive=false; toneFor(item.key); return; }
     window.speechSynthesis.resume();
-    const u=new SpeechSynthesisUtterance(item.text);
-    u.lang='ko-KR'; u.rate=.82; u.pitch=1.0; u.volume=1.0;
-    const voice = pickKoreanVoice();
-    if(voice) u.voice=voice;
+    const u=makeUtterance(item.text, item.key);
     let doneCalled=false;
     const done=()=>{ if(doneCalled) return; doneCalled=true; speechActive=false; updateVoiceStatus(speechQueue.length?`안내 중 ${speechQueue.length}`:'활성화됨'); setTimeout(drainSpeechQueue,120); };
     u.onstart=()=>updateVoiceStatus('음성 안내 중');
@@ -608,7 +630,7 @@ function gestureActionText(){
 }
 function taskIntroText(){
   if(CONFIG.exercise.taskType==='hand_bubbles'){
-    return `물방울 잡아 터뜨리기 훈련을 시작합니다. 목표는 총 ${CONFIG.targetCount}개입니다. 먼저 손을 편안하게 펴고 화면 안에 보여 주세요. 화면 속 얼굴 아래쪽에 여러 개의 물방울이 나타납니다. 물방울 하나를 선택해서 손바닥 중심을 물방울 안으로 천천히 가져가세요. 손바닥 점이 닿는 것만으로는 성공이 아닙니다. 물방울 안에서 손가락을 굽혀 손을 쥐고, 안내가 끝날 때까지 잠시 유지해야 물방울이 터집니다. 물방울이 터지면 손을 다시 편안하게 펴고 다음 물방울로 이동하세요. 모든 물방울이 사라지면 성공적으로 종료됩니다.`;
+    return `${calibrationRequiredNotice()} 물방울 잡아 터뜨리기 훈련을 시작합니다. 목표는 총 ${CONFIG.targetCount}개입니다. 먼저 손을 편안하게 펴고 화면 안에 보여 주세요. 화면 속 얼굴 아래쪽에 여러 개의 물방울이 나타납니다. 물방울 하나를 선택해서 손바닥 중심을 물방울 안으로 천천히 가져가세요. 손바닥 점이 닿는 것만으로는 성공이 아닙니다. 물방울 안에서 손가락을 굽혀 손을 쥐고, 안내가 끝날 때까지 잠시 유지해야 물방울이 터집니다. 물방울이 터지면 손을 다시 편안하게 펴고 다음 물방울로 이동하세요. 모든 물방울이 사라지면 성공적으로 종료됩니다.`;
   }
   return `${CONFIG.exercise.label} 훈련을 시작합니다. 목표는 총 ${CONFIG.targetCount}회입니다. 환자분은 화면 안내에 따라 한 단계씩 수행하고, 성공하면 다시 처음 자세에서 같은 과정을 반복합니다. ${taskStartText()}`;
 }
@@ -621,11 +643,35 @@ function taskStartText(){
 }
 function taskStartMessage(){ const t=CONFIG.exercise.taskType; if(t==='cup_drink') return 'cup_reach'; if(t==='hand_bubbles') return 'air_bubble_seek'; return 'seek_target'; }
 
+function metricText(v){ return Number.isFinite(v) ? v.toFixed(2) : '-'; }
+function calibrationSummary(){
+  const openText = openMetrics ? `손 편 기준 ${metricText(openMetrics.fingertipAvg)}` : '손 편 기준 미보정';
+  const closeText = closeMetrics ? `쥔 기준 ${metricText(closeMetrics.fingertipAvg)}` : '쥔 기준 미보정';
+  const rangeText = (openMetrics && closeMetrics) ? ` · 기준 범위 ${metricText(openMetrics.fingertipAvg-closeMetrics.fingertipAvg)}` : '';
+  const warning = (openMetrics && closeMetrics && openMetrics.fingertipAvg <= closeMetrics.fingertipAvg + 0.08) ? ' · 기준 차이가 작습니다. 보정을 다시 권장합니다.' : '';
+  return `${openText} / ${closeText}${rangeText}${warning}`;
+}
+function updateCalibrationStatus(){
+  ui.calStatus.textContent = calibrationSummary();
+}
+function calibrationRequiredNotice(){
+  if(openMetrics && closeMetrics) return '';
+  return '정확도를 높이려면 먼저 손 편 상태 보정과 쥔/집은 상태 보정을 모두 시행하세요.';
+}
+
 function startCalibration(mode){
-  if(!running) return;
-  calMode=mode; calSamples=[]; calStart=now(); state=mode==='open'?'cal_open':'cal_close'; ui.calFill.style.width='0%';
+  if(!running){
+    setInstruction('먼저 카메라/모델을 시작하세요','손 보정은 손 landmark가 인식된 뒤 시행할 수 있습니다.','warn');
+    speakText('cal_need_camera', '먼저 카메라와 모델을 시작한 뒤 손 보정을 진행하세요.', true);
+    return;
+  }
+  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; state=mode==='open'?'cal_open':'cal_close'; ui.calFill.style.width='0%';
   if(mode==='open') speakOnce('open_cal_start',true); else speakOnce('close_cal_start',true);
-  setInstruction(mode==='open'?'손을 편 상태로 유지하세요':(CONFIG.exercise.gesture==='pinch'?'엄지와 검지를 맞대세요':'손을 쥐세요'),'2초 동안 카메라 앞에서 유지합니다.','warn');
+  const title = mode==='open' ? '손 편 상태 보정 중' : (CONFIG.exercise.gesture==='pinch'?'집기 상태 보정 중':'쥔 상태 보정 중');
+  const detail = mode==='open'
+    ? '가능한 범위에서 손가락을 최대한 펴고 2초 동안 유지하세요. 2초 평균값을 손 편 기준으로 저장합니다.'
+    : (CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞대고 2초 동안 유지하세요. 2초 평균값을 집기 기준으로 저장합니다.' : '손가락을 가능한 범위에서 굽혀 손을 쥐고 2초 동안 유지하세요. 2초 평균값을 쥔 기준으로 저장합니다.');
+  setInstruction(title, detail, 'warn');
 }
 
 function chooseHand(result){
@@ -659,12 +705,31 @@ function handMetrics(lmRaw){
   const spread = dist(index,pinky)/palmSize;
   return {lm, wrist, thumb, index, middle, ring, pinky, palm, cursor, palmSize, pinch, fingertipAvg, angle, spread};
 }
-function gestureScore(m, gesture=CONFIG.exercise.gesture){
-  if(gesture==='open'){ const closeVal=closeMetrics?.fingertipAvg ?? 1.05; const openVal=openMetrics?.fingertipAvg ?? 1.75; return clamp((m.fingertipAvg-closeVal)/Math.max(.12,openVal-closeVal),0,1); }
-  if(gesture==='pinch'){ const openVal=openMetrics?.pinch ?? .75; const closeVal=closeMetrics?.pinch ?? .18; return clamp((openVal-m.pinch)/Math.max(.08,openVal-closeVal),0,1); }
-  const openVal=openMetrics?.fingertipAvg ?? 1.75; const closeVal=closeMetrics?.fingertipAvg ?? 1.05; return clamp((openVal-m.fingertipAvg)/Math.max(.12,openVal-closeVal),0,1);
+function calibratedFingerRange(){
+  let openVal = openMetrics?.fingertipAvg ?? 1.75;
+  let closeVal = closeMetrics?.fingertipAvg ?? 1.05;
+  // If calibration is inverted or too narrow, keep the app usable with conservative default spacing.
+  if(openVal <= closeVal + 0.08){ openVal = Math.max(openVal, closeVal + 0.35); }
+  return {openVal, closeVal, range:Math.max(0.12, openVal-closeVal)};
 }
-function updateGestureDisplay(m){ smoothedGesture=lerp(smoothedGesture, gestureScore(m), .22); ui.gesture.textContent=`${Math.round(smoothedGesture*100)}%`; }
+function gestureScore(m, gesture=CONFIG.exercise.gesture){
+  if(gesture==='open'){
+    const r=calibratedFingerRange();
+    return clamp((m.fingertipAvg-r.closeVal)/r.range,0,1);
+  }
+  if(gesture==='pinch'){
+    const openVal=openMetrics?.pinch ?? .75;
+    const closeVal=closeMetrics?.pinch ?? .18;
+    const range=Math.max(.08, openVal-closeVal);
+    return clamp((openVal-m.pinch)/range,0,1);
+  }
+  const r=calibratedFingerRange();
+  return clamp((r.openVal-m.fingertipAvg)/r.range,0,1);
+}
+function updateGestureDisplay(m){
+  smoothedGesture=lerp(smoothedGesture, gestureScore(m), .22);
+  ui.gesture.textContent=`${Math.round(smoothedGesture*100)}%`;
+}
 function canvasPoint(p){ return {x:(CONFIG.mirrorView ? 1-p.x : p.x)*canvas.width, y:p.y*canvas.height}; }
 function cursorPx(m){ const p=canvasPoint(m.cursor); if(!smoothedCursor) smoothedCursor=p; smoothedCursor={x:lerp(smoothedCursor.x,p.x,.30), y:lerp(smoothedCursor.y,p.y,.30)}; return smoothedCursor; }
 function targetRadius(){ return CONFIG.levelConfig.targetRadius*CONFIG.targetSizeScale; }
@@ -732,10 +797,15 @@ function processBubble(m){
   beginHold(); const hp=holdProgress(); setInstruction('3단계: 끝동작을 잠시 유지하세요',`${Math.round(clamp(hp,0,1)*100)}%`, 'warn'); state='hold_gesture'; if(hp>=1) onSuccess();
 }
 
+function bubbleSpeedPx(){
+  const s=Number(CONFIG.speedScale)||0;
+  if(s<=0.01) return 0;
+  const base = 0.42 + (CONFIG.levelConfig.speed||0)*0.72 + CONFIG.level*0.045;
+  return clamp(base * Math.pow(s, 1.32) * 1.35, 0, 7.2);
+}
 function makeAirBubble(id,x,y,r){
-  const sp=CONFIG.levelConfig.speed*CONFIG.speedScale;
   const angle=Math.random()*Math.PI*2;
-  const speed=sp*(0.35+Math.random()*0.55);
+  const speed=bubbleSpeedPx()*(0.72+Math.random()*0.56);
   return {id,x,y,r,baseX:x,baseY:y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed,popped:false,locked:false, shimmer:Math.random()*Math.PI*2};
 }
 function bubbleAnchor(){
@@ -746,15 +816,15 @@ function bubbleAnchor(){
   return {x: canvas.width*0.5, y: canvas.height*0.36};
 }
 function bubbleLayoutBounds(anchor, r, count){
-  const cols = Math.max(2, Math.ceil(Math.sqrt(count * canvas.width / Math.max(1, canvas.height*0.62))));
+  const cols = Math.max(2, Math.ceil(Math.sqrt(count * canvas.width / Math.max(1, canvas.height*0.56))));
   const rows = Math.ceil(count/cols);
-  const areaW = canvas.width*0.84;
-  const areaH = canvas.height*0.54;
-  const safeR = Math.max(18, Math.min(r, areaW/(cols*2.85), areaH/(rows*2.85)));
-  const left = clamp(anchor.x-areaW/2, safeR+18, canvas.width-safeR-18);
-  const right = clamp(anchor.x+areaW/2, safeR+18, canvas.width-safeR-18);
-  const top = clamp(anchor.y-safeR*.35, safeR+18, canvas.height-safeR-18);
-  const bottom = clamp(anchor.y+areaH, safeR+18, canvas.height-safeR-18);
+  const areaW = canvas.width*0.88;
+  const areaH = canvas.height*0.58;
+  const safeR = Math.max(16, Math.min(r, areaW/(cols*3.35), areaH/(rows*3.35)));
+  const left = clamp(anchor.x-areaW/2, safeR+22, canvas.width-safeR-22);
+  const right = clamp(anchor.x+areaW/2, safeR+22, canvas.width-safeR-22);
+  const top = clamp(anchor.y-safeR*.25, safeR+22, canvas.height-safeR-22);
+  const bottom = clamp(anchor.y+areaH, safeR+22, canvas.height-safeR-22);
   return {cols, rows, r:safeR, left, right, top, bottom, areaW:right-left, areaH:bottom-top};
 }
 function buildBubbleCluster(){
@@ -794,9 +864,9 @@ function separateBubbles(strong=false){
       let dx=b.x-a.x, dy=b.y-a.y;
       let d=Math.hypot(dx,dy);
       if(d<0.001){ dx=(Math.random()*2-1); dy=(Math.random()*2-1); d=Math.hypot(dx,dy); }
-      const minD=(a.r+b.r)*1.38;
+      const minD=(a.r+b.r)*1.62 + 12;
       if(d<minD){
-        const push=(minD-d)/(strong?1.6:2.2);
+        const push=(minD-d)/(strong?1.15:1.55);
         const nx=dx/d, ny=dy/d;
         a.x-=nx*push; a.y-=ny*push; b.x+=nx*push; b.y+=ny*push;
         a.baseX=a.x; a.baseY=a.y; b.baseX=b.x; b.baseY=b.y;
@@ -818,21 +888,19 @@ function moveAirBubbles(){
   const anchor = bubbleAnchor();
   target.anchor = anchor;
   const layout=bubbleLayoutBounds(anchor, target.r || targetRadius()*0.52, CONFIG.targetCount);
+  const moving = (Number(CONFIG.speedScale)||0) > 0.01;
   for(const b of target.bubbles){
     if(b.popped) continue;
-    b.shimmer += 0.04;
-    if(CONFIG.speedScale>0){
-      b.baseX += b.vx*0.35;
-      b.baseY += b.vy*0.35;
-      if(b.baseX<layout.left || b.baseX>layout.right) b.vx*=-1;
-      if(b.baseY<layout.top || b.baseY>layout.bottom) b.vy*=-1;
-      b.baseX = clamp(b.baseX, layout.left, layout.right);
-      b.baseY = clamp(b.baseY, layout.top, layout.bottom);
+    b.shimmer += 0.04 + 0.012*(Number(CONFIG.speedScale)||0);
+    if(moving){
+      b.x += b.vx;
+      b.y += b.vy;
+      if(b.x < layout.left || b.x > layout.right){ b.vx *= -1; b.x=clamp(b.x,layout.left,layout.right); }
+      if(b.y < layout.top || b.y > layout.bottom){ b.vy *= -1; b.y=clamp(b.y,layout.top,layout.bottom); }
+      b.baseX = b.x; b.baseY = b.y;
     }
-    b.x = lerp(b.x, b.baseX, 0.10);
-    b.y = lerp(b.y, b.baseY, 0.10);
   }
-  separateBubbles(false);
+  for(let pass=0; pass<3; pass++) separateBubbles(false);
 }
 function nearestAirBubble(c){
   let best=null, bestD=Infinity;
@@ -846,12 +914,12 @@ function nearestAirBubble(c){
 function remainingBubbles(){
   return (target?.bubbles||[]).filter(b=>!b.popped).length;
 }
-function openGestureThreshold(){ return clamp(CONFIG.gestureThreshold*0.42, 0.10, 0.32); }
+function openGestureThreshold(){ return clamp(CONFIG.gestureThreshold*0.38, 0.08, 0.30); }
 function resetBubbleOpenGate(){ bubbleOpenReady=false; bubbleOpenStart=0; bubbleCandidateId=null; }
-function registerOpenHand(){
+function registerOpenHand(minMs=500){
   if(smoothedGesture <= openGestureThreshold()){
     if(!bubbleOpenStart) bubbleOpenStart=now();
-    if(now()-bubbleOpenStart>280) bubbleOpenReady=true;
+    if(now()-bubbleOpenStart>=minMs) bubbleOpenReady=true;
   }else{
     bubbleOpenStart=0; bubbleOpenReady=false;
   }
@@ -884,24 +952,30 @@ function processHandBubbles(m){
       speakText('stage_bubble_seek_'+score, `좋습니다. 손을 편 상태로 물방울 하나에 천천히 가져가세요.`, false);
       lastStatusVoice=now();
     }
-    setInstruction(ready?'1단계: 물방울 하나에 손을 가져가세요':'준비: 먼저 손을 펴세요', ready?`남은 물방울 ${remain}개 중 하나 안으로 손바닥 중심을 천천히 이동합니다.`:`현재 손쥐기 점수 ${Math.round(smoothedGesture*100)}%. 손을 편 뒤 물방울로 이동해야 성공 판정이 시작됩니다.`, ready?'info':'warn');
+    setInstruction(ready?'1단계: 물방울 하나에 손을 가져가세요':'준비: 먼저 손을 펴세요', ready?`남은 물방울 ${remain}개 중 하나 안으로 손바닥 중심을 천천히 이동합니다.`:`현재 손쥐기 점수 ${Math.round(smoothedGesture*100)}%. 손 편 기준은 ${Math.round(openGestureThreshold()*100)}% 이하입니다. 손을 편 뒤 물방울로 이동해야 성공 판정이 시작됩니다.`, ready?'info':'warn');
     stage='air_seek'; state='air_bubble_seek'; return;
   }
   if(!bubbleOpenReady){
     if(openOK){
-      bubbleOpenReady=true; bubbleOpenStart=now();
+      if(!bubbleOpenStart) bubbleOpenStart=now();
+      const openPct = clamp((now()-bubbleOpenStart)/500,0,1);
+      setInstruction('준비: 손을 편 상태로 유지하세요',`손 편 상태 확인 ${Math.round(openPct*100)}%. 확인 후 손을 쥐어야 물방울이 터집니다.`, 'warn');
+      stage='air_open_required'; state='air_bubble_open_required';
+      if(openPct<1) return;
+      bubbleOpenReady=true;
+      holdStart=null;
       speakText('stage_open_confirmed_'+score, '손이 펴진 상태가 확인되었습니다. 이제 물방울 안에서 손가락을 굽혀 손을 쥐세요.', false);
     }else{
-      holdStart=null;
+      bubbleOpenStart=0; holdStart=null;
       if(now()-lastStatusVoice>4200){ speakText('stage_need_open_'+score, '손이 이미 쥐어진 상태입니다. 물방울을 터뜨리려면 먼저 손을 펴고, 그 다음 손가락을 굽혀 쥐어야 합니다.', false); lastStatusVoice=now(); }
-      setInstruction('먼저 손을 펴세요','손을 쥔 채 물방울에 닿으면 성공으로 기록하지 않습니다. 손을 편 뒤 다시 쥐세요.','warn');
+      setInstruction('먼저 손을 펴세요',`손을 쥔 채 물방울에 닿으면 성공으로 기록하지 않습니다. 손 편 기준 ${Math.round(openGestureThreshold()*100)}% 이하를 먼저 충족해야 합니다.`,'warn');
       stage='air_open_required'; state='air_bubble_open_required'; return;
     }
   }
   if(!graspOK){
     holdStart=null;
     if(now()-lastStatusVoice>4200){ speakText('stage_bubble_grasp_'+score, `물방울 안에 손이 들어왔습니다. 이제 손가락을 굽혀 손을 쥐세요. 손쥐기 기준은 ${Math.round(CONFIG.gestureThreshold*100)}퍼센트입니다.`, false); lastStatusVoice=now(); }
-    setInstruction('2단계: 손가락을 굽혀 쥐세요',`손쥐기 점수 ${Math.round(smoothedGesture*100)}% / 기준 ${Math.round(CONFIG.gestureThreshold*100)}%`, 'action');
+    setInstruction('2단계: 손가락을 굽혀 쥐세요',`손쥐기 점수 ${Math.round(smoothedGesture*100)}% / 쥔 기준 ${Math.round(CONFIG.gestureThreshold*100)}%. 보정값: ${calibrationSummary()}`, 'action');
     stage='air_grasp'; state='air_bubble_grasp'; return;
   }
   if(!holdStart){ holdStart=now(); speakText('stage_bubble_hold_'+score, '좋습니다. 손을 쥔 상태를 그대로 유지하세요. 유지 시간이 채워지면 물방울이 터집니다.', false); }
@@ -1008,8 +1082,32 @@ function processGame(m,handed,handScore){
   checkStepTimeout();
 }
 function processCalibration(m){
-  const progress=clamp((now()-calStart)/2200,0,1); ui.calFill.style.width=`${Math.round(progress*100)}%`; calSamples.push({pinch:m.pinch,fingertipAvg:m.fingertipAvg,angle:m.angle});
-  if(progress>=1){ const avg={pinch:mean(calSamples.map(s=>s.pinch)),fingertipAvg:mean(calSamples.map(s=>s.fingertipAvg)),angle:mean(calSamples.map(s=>s.angle))}; if(calMode==='open') openMetrics=avg; else closeMetrics=avg; calMode=null; calSamples=[]; ui.calFill.style.width='100%'; ui.calStatus.textContent=`편 상태: ${openMetrics?'완료':'미완료'} / 쥔·집은 상태: ${closeMetrics?'완료':'미완료'}`; speakOnce('cal_done',true); setInstruction('보정이 완료되었습니다','훈련 목표로 손을 이동하세요.','ready'); state='waiting_hand'; }
+  const elapsed=now()-calStart;
+  const progress=clamp(elapsed/2200,0,1);
+  ui.calFill.style.width=`${Math.round(progress*100)}%`;
+  calSamples.push({pinch:m.pinch,fingertipAvg:m.fingertipAvg,angle:m.angle});
+  const remain=Math.max(0, 2.2-elapsed/1000);
+  const modeName = calMode==='open' ? '손 편 상태' : (CONFIG.exercise.gesture==='pinch'?'집기 상태':'쥔 상태');
+  setInstruction(`${modeName} 보정 중`, `남은 시간 ${remain.toFixed(1)}초 · 현재 손가락 거리값 ${m.fingertipAvg.toFixed(2)} · 2초 평균을 기준점으로 저장합니다.`, 'warn');
+  const milestone=Math.floor(elapsed/700);
+  if(milestone!==calVoiceMilestone && elapsed<2100){
+    calVoiceMilestone=milestone;
+    if(milestone===1) speakText('cal_keep_'+calMode, '좋습니다. 손 모양을 그대로 유지하세요.', false);
+    if(milestone===2) speakText('cal_almost_'+calMode, '거의 끝났습니다. 조금만 더 유지하세요.', false);
+  }
+  if(progress>=1){
+    const avg={pinch:mean(calSamples.map(s=>s.pinch)),fingertipAvg:mean(calSamples.map(s=>s.fingertipAvg)),angle:mean(calSamples.map(s=>s.angle))};
+    const savedMode=calMode;
+    if(savedMode==='open') openMetrics=avg; else closeMetrics=avg;
+    calMode=null; calSamples=[]; calVoiceMilestone=-1; ui.calFill.style.width='100%'; updateCalibrationStatus();
+    const resultText = savedMode==='open'
+      ? `손 편 상태 보정이 완료되었습니다. 2초 평균값 ${avg.fingertipAvg.toFixed(2)}를 손 편 기준으로 저장했습니다.`
+      : `쥔 상태 보정이 완료되었습니다. 2초 평균값 ${avg.fingertipAvg.toFixed(2)}를 쥔 기준으로 저장했습니다.`;
+    const warnText = (openMetrics && closeMetrics && openMetrics.fingertipAvg <= closeMetrics.fingertipAvg + 0.08) ? ' 손 편 기준과 쥔 기준의 차이가 작습니다. 환자분이 가능한 범위에서 다시 보정하는 것이 좋습니다.' : '';
+    speakText('cal_done_'+savedMode, resultText + warnText, true);
+    setInstruction('보정이 완료되었습니다', `${resultText}${warnText} 훈련 목표로 손을 이동하세요.`, 'ready');
+    state='waiting_hand';
+  }
 }
 function completeGame(){
   if(state==='complete') return;
@@ -1241,6 +1339,7 @@ function bindButtons(){
 }
 bindButtons();
 setInstruction('카메라/모델 시작을 누르세요','버튼을 눌렀을 때 문구가 바뀌면 버튼 입력은 정상입니다. 모델 로딩 오류가 있으면 화면에 표시됩니다.','info');
+updateCalibrationStatus();
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>
 </body>

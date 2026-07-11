@@ -272,6 +272,7 @@ HTML = r'''
       <div class="metric"><span>실패 횟수</span><b id="failText">0</b></div>
       <div class="metric"><span>손동작 점수</span><b id="gestureText">0%</b></div>
       <div class="metric"><span>현재 손</span><b id="handText">-</b></div>
+      <div class="metric"><span>음성 상태</span><b id="voiceStatusText">대기</b></div>
       <div class="metric"><span>성공률</span><b id="accuracyText">-</b></div>
       <div class="metric"><span>평균 반응시간</span><b id="rtText">-</b></div>
       <div class="calBox"><b>환자별 보정 상태</b><div class="small">손 편 상태와 쥔/집은 상태를 보정하면 마비 손의 변형과 제한된 움직임을 더 잘 반영합니다.</div><div class="small" id="calStatus">기본값 사용 중</div><div class="bar"><div class="fill" id="calFill"></div></div></div>
@@ -351,7 +352,7 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('outputCanvas');
 const ctx = canvas.getContext('2d');
 const ui = {
-  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), downloadArea: document.getElementById('downloadArea')
+  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), downloadArea: document.getElementById('downloadArea')
 };
 const btn = { start:document.getElementById('btnStart'), sound:document.getElementById('btnSound'), openCal:document.getElementById('btnOpenCal'), closeCal:document.getElementById('btnCloseCal'), reset:document.getElementById('btnReset'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
 
@@ -387,10 +388,11 @@ const messages = {
 
 let handLandmarker=null, faceLandmarker=null, stream=null, running=false, paused=false, animationId=null, lastVideoTime=-1;
 let audioCtx=null, soundUnlocked=false, lastSpeakKey='', lastSpeakAt=0;
-let speechQueue=[], speechActive=false, speechMaxQueue=4;
+let speechQueue=[], speechActive=false, speechMaxQueue=12, selectedKoreanVoice=null;
 let state='idle', score=0, attempts=0, successes=0, failureCount=0, reactionTimes=[], successTimes=[], gameStartTime=0;
 let target=null, stage='none', holdStart=null, overlapStart=null, reactionStart=null, lastStatusVoice=0;
 let targetSerial=0, lastStepId='', stepStartedAt=0, lastFailureAt=0;
+let bubbleOpenReady=false, bubbleOpenStart=0, bubbleCandidateId=null;
 let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0;
 let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundAt=0, neutralTilt=null;
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
@@ -410,14 +412,53 @@ function setInstruction(big, sub='', kind='info'){
 }
 function log(msg){ ui.log.textContent=msg; }
 
+function updateVoiceStatus(text){ if(ui.voice) ui.voice.textContent=text; }
+function pickKoreanVoice(){
+  if(!('speechSynthesis' in window)) return null;
+  const voices = window.speechSynthesis.getVoices ? window.speechSynthesis.getVoices() : [];
+  if(!voices || voices.length===0) return null;
+  selectedKoreanVoice = voices.find(v => (v.lang||'').toLowerCase().startsWith('ko')) || voices.find(v => /korean|한국|ko/i.test((v.name||'')+' '+(v.lang||''))) || voices[0];
+  return selectedKoreanVoice;
+}
+function splitSpeechText(text){
+  const raw = String(text||'').replace(/\s+/g,' ').trim();
+  if(!raw) return [];
+  const sents = raw.match(/[^.!?。！？]+[.!?。！？]?/g) || [raw];
+  const chunks=[]; let buf='';
+  for(const s of sents){
+    const part=s.trim(); if(!part) continue;
+    if((buf+' '+part).trim().length>95){ if(buf) chunks.push(buf.trim()); buf=part; }
+    else buf=(buf+' '+part).trim();
+  }
+  if(buf) chunks.push(buf.trim());
+  return chunks.length?chunks:[raw];
+}
+function primeSpeechSynthesis(){
+  if(!('speechSynthesis' in window)){ updateVoiceStatus('음성합성 없음'); return false; }
+  try{
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.resume();
+    const voice=pickKoreanVoice();
+    updateVoiceStatus(voice ? `음성 준비: ${voice.lang || 'voice'}` : '음성 준비 중');
+    return true;
+  }catch(e){ updateVoiceStatus('음성 준비 실패'); return false; }
+}
+if('speechSynthesis' in window){
+  window.speechSynthesis.onvoiceschanged = () => { pickKoreanVoice(); updateVoiceStatus(selectedKoreanVoice ? `음성 준비: ${selectedKoreanVoice.lang || 'voice'}` : '음성 준비'); };
+}
+
+
 async function unlockAudio(){
   try{
     audioCtx = audioCtx || new (window.AudioContext||window.webkitAudioContext)();
     if(audioCtx.state==='suspended') await audioCtx.resume();
+    soundUnlocked=true;
+    primeSpeechSynthesis();
     beep(660,.08,.06); setTimeout(()=>beep(880,.08,.06),110);
-    soundUnlocked=true; speakOnce('sound_test', true);
-    setInstruction('소리 안내가 활성화되었습니다','말소리가 안 들려도 신호음·진동·화면 안내가 함께 작동합니다.','ready');
-  }catch(e){ setInstruction('소리 활성화가 제한되었습니다','무음모드와 미디어 볼륨을 확인하세요.','warn'); }
+    setInstruction('소리 안내가 활성화되었습니다','훈련 설명과 단계 안내가 음성으로 출력됩니다. 들리지 않으면 미디어 볼륨과 무음모드를 확인하세요.','ready');
+    speakText('sound_test','소리 안내가 활성화되었습니다. 이제 화면 안내와 음성 안내에 따라 천천히 훈련하세요.',true);
+    updateVoiceStatus('활성화됨');
+  }catch(e){ updateVoiceStatus('차단됨'); setInstruction('소리 활성화가 제한되었습니다','무음모드, 미디어 볼륨, 브라우저 자동재생 제한을 확인하세요.','warn'); }
 }
 function beep(freq=660,duration=.12,vol=.08){
   if(CONFIG.soundMode==='silent') return;
@@ -451,17 +492,20 @@ function playMessage(key,text){
   fallbackSpeechOrTone(text,key);
 }
 function fallbackSpeechOrTone(text,key){
-  if(CONFIG.soundMode==='tone_only' || !('speechSynthesis' in window)){ toneFor(key); return; }
-  try{ enqueueSpeech(text,key); }catch(e){ toneFor(key); }
+  if(CONFIG.soundMode==='tone_only' || !('speechSynthesis' in window)){ toneFor(key); updateVoiceStatus('신호음'); return; }
+  try{ enqueueSpeech(text,key); }catch(e){ toneFor(key); updateVoiceStatus('음성 실패'); }
 }
 function enqueueSpeech(text,key){
-  const important = key.startsWith('task_intro') || key.startsWith('task_begin') || key.startsWith('complete') || key.startsWith('fail');
+  const important = key.startsWith('task_intro') || key.startsWith('task_begin') || key.startsWith('complete') || key.startsWith('fail') || key==='sound_test';
   if(important){
-    speechQueue = speechQueue.filter(item => !(item.key.startsWith('stage_') || item.key==='air_bubble_seek'));
+    window.speechSynthesis?.cancel?.();
+    speechActive=false;
+    speechQueue = [];
   }else if(speechQueue.length >= speechMaxQueue){
     speechQueue = speechQueue.slice(-speechMaxQueue+1);
   }
-  speechQueue.push({text,key});
+  const parts = splitSpeechText(text);
+  parts.forEach((part,idx)=>speechQueue.push({text:part,key:idx===0?key:`${key}_part${idx}`}));
   drainSpeechQueue();
 }
 function drainSpeechQueue(){
@@ -469,18 +513,27 @@ function drainSpeechQueue(){
   const item = speechQueue.shift();
   speechActive = true;
   try{
+    if(!soundUnlocked){ speechActive=false; toneFor(item.key); return; }
+    window.speechSynthesis.resume();
     const u=new SpeechSynthesisUtterance(item.text);
-    u.lang='ko-KR'; u.rate=.88; u.pitch=1.0; u.volume=1.0;
-    const done=()=>{ speechActive=false; setTimeout(drainSpeechQueue,80); };
-    u.onend=done; u.onerror=()=>{ toneFor(item.key); done(); };
+    u.lang='ko-KR'; u.rate=.82; u.pitch=1.0; u.volume=1.0;
+    const voice = pickKoreanVoice();
+    if(voice) u.voice=voice;
+    let doneCalled=false;
+    const done=()=>{ if(doneCalled) return; doneCalled=true; speechActive=false; updateVoiceStatus(speechQueue.length?`안내 중 ${speechQueue.length}`:'활성화됨'); setTimeout(drainSpeechQueue,120); };
+    u.onstart=()=>updateVoiceStatus('음성 안내 중');
+    u.onend=done;
+    u.onerror=(e)=>{ console.warn('speech error',e); toneFor(item.key); updateVoiceStatus('음성 오류'); done(); };
     window.speechSynthesis.speak(u);
-    setTimeout(()=>{ if(speechActive && window.speechSynthesis.speaking===false){ toneFor(item.key); speechActive=false; drainSpeechQueue(); } },900);
-  }catch(e){ speechActive=false; toneFor(item.key); drainSpeechQueue(); }
+    setTimeout(()=>{ try{ window.speechSynthesis.resume(); }catch(e){} },700);
+    setTimeout(()=>{ if(speechActive && !window.speechSynthesis.speaking){ toneFor(item.key); done(); } },4500);
+  }catch(e){ speechActive=false; toneFor(item.key); updateVoiceStatus('음성 실패'); drainSpeechQueue(); }
 }
 
 async function startApp(){
   if(running) return;
   try{
+    if(!soundUnlocked && CONFIG.soundMode!=='silent') await unlockAudio();
     setInstruction('버튼 입력이 확인되었습니다','MediaPipe Hands 모듈과 모델을 불러오는 중입니다. 잠시 기다려 주세요.','info');
     log('카메라/모델 시작 버튼이 눌렸습니다. MediaPipe Hands 모듈을 불러오는 중입니다.');
     await loadVisionModule();
@@ -543,7 +596,7 @@ async function startApp(){
 }
 function stopApp(){ running=false; paused=false; if(animationId) cancelAnimationFrame(animationId); if(stream) stream.getTracks().forEach(t=>t.stop()); stream=null; setInstruction('카메라가 정지되었습니다','다시 시작하려면 카메라/모델 시작을 누르세요.','info'); }
 function resetGame(announce=true){
-  score=0; attempts=0; successes=0; failureCount=0; reactionTimes=[]; successTimes=[]; target=null; stage='none'; holdStart=null; overlapStart=null; reactionStart=null; particles=[]; gameStartTime=now(); state='waiting_hand'; ui.downloadArea.innerHTML=''; neutralTilt=null; successLock=false; targetSerial=0; lastStepId=''; stepStartedAt=now(); lastFailureAt=0; updateUI(); spawnTaskTarget();
+  score=0; attempts=0; successes=0; failureCount=0; reactionTimes=[]; successTimes=[]; target=null; stage='none'; holdStart=null; overlapStart=null; reactionStart=null; particles=[]; gameStartTime=now(); state='waiting_hand'; ui.downloadArea.innerHTML=''; neutralTilt=null; successLock=false; targetSerial=0; lastStepId=''; stepStartedAt=now(); lastFailureAt=0; resetBubbleOpenGate(); updateUI(); spawnTaskTarget();
   if(announce){
     speakText('task_intro_'+targetSerial, taskIntroText(), true);
   }
@@ -622,7 +675,7 @@ function spawnTaskTarget(){
   holdStart=null; overlapStart=null; reactionStart=now(); successLock=false; targetSerial++; lastStepId=''; stepStartedAt=now();
   if(type==='bubble'){ target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
   else if(type==='cup_drink'){ target={cup:{x:canvas.width*.25,y:canvas.height*.64,r:r*.82,attached:false}, mouth:mouthFallback(r)}; stage='cup_reach'; state='cup_reach'; }
-  else if(type==='hand_bubbles'){ target={kind:'air_bubbles', bubbles:[], initialized:false, lastPop:null, activeId:null, anchor:{x:canvas.width*.50,y:canvas.height*.34}, r:r*.52}; stage='air_seek'; state='air_bubble_seek'; }
+  else if(type==='hand_bubbles'){ resetBubbleOpenGate(); target={kind:'air_bubbles', bubbles:[], initialized:false, lastPop:null, activeId:null, anchor:{x:canvas.width*.50,y:canvas.height*.34}, r:r*.52}; stage='air_seek'; state='air_bubble_seek'; }
   else { target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
 }
 function moveTarget(t){ if(!t||!t.vx) return; t.x+=t.vx; t.y+=t.vy; if(t.x<t.r||t.x>canvas.width-t.r) t.vx*=-1; if(t.y<t.r||t.y>canvas.height-t.r) t.vy*=-1; }
@@ -631,7 +684,7 @@ function holdProgress(){ return holdStart ? (now()-holdStart)/CONFIG.holdMs : 0;
 function beginHold(){ if(!holdStart){ holdStart=now(); speakOnce('hold_gesture'); } }
 function resetHold(){ holdStart=null; }
 function resetCurrentAttempt(){
-  holdStart=null; overlapStart=null; reactionStart=now(); neutralTilt=null; successLock=false;
+  holdStart=null; overlapStart=null; reactionStart=now(); neutralTilt=null; successLock=false; resetBubbleOpenGate();
   if(CONFIG.exercise.taskType==='hand_bubbles' && target && target.kind==='air_bubbles'){
     target.activeId = null; stage='air_seek'; state='air_bubble_seek';
   }else{
@@ -665,7 +718,7 @@ function onSuccess(){
   setInstruction('정상적으로 성공했습니다', `물방울 ${score}개를 터뜨렸습니다. 남은 물방울은 ${remain}개입니다.`, 'ready');
   speakText('rep_success_'+score, `정상적으로 성공했습니다. 물방울 ${score}개를 터뜨렸습니다. 남은 물방울은 ${remain}개입니다. 처음 자세에서 다음 물방울을 계속 터뜨리세요.`, true);
   setTimeout(()=>{ if(running&&!paused&&state!=='complete'){
-    if(CONFIG.exercise.taskType==='hand_bubbles' && target && target.kind==='air_bubbles'){ holdStart=null; successLock=false; stage='air_seek'; state='air_bubble_seek'; reactionStart=now(); target.activeId=null; }
+    if(CONFIG.exercise.taskType==='hand_bubbles' && target && target.kind==='air_bubbles'){ holdStart=null; successLock=false; resetBubbleOpenGate(); stage='air_seek'; state='air_bubble_seek'; reactionStart=now(); target.activeId=null; }
     else{ spawnTaskTarget(); speakText('rep_start_'+targetSerial, taskStartText(), true); }
   } }, 1200);
 }
@@ -692,45 +745,38 @@ function bubbleAnchor(){
   }
   return {x: canvas.width*0.5, y: canvas.height*0.36};
 }
+function bubbleLayoutBounds(anchor, r, count){
+  const cols = Math.max(2, Math.ceil(Math.sqrt(count * canvas.width / Math.max(1, canvas.height*0.62))));
+  const rows = Math.ceil(count/cols);
+  const areaW = canvas.width*0.84;
+  const areaH = canvas.height*0.54;
+  const safeR = Math.max(18, Math.min(r, areaW/(cols*2.85), areaH/(rows*2.85)));
+  const left = clamp(anchor.x-areaW/2, safeR+18, canvas.width-safeR-18);
+  const right = clamp(anchor.x+areaW/2, safeR+18, canvas.width-safeR-18);
+  const top = clamp(anchor.y-safeR*.35, safeR+18, canvas.height-safeR-18);
+  const bottom = clamp(anchor.y+areaH, safeR+18, canvas.height-safeR-18);
+  return {cols, rows, r:safeR, left, right, top, bottom, areaW:right-left, areaH:bottom-top};
+}
 function buildBubbleCluster(){
   if(!target || target.kind!=='air_bubbles') return;
   const anchor = bubbleAnchor();
   target.anchor = anchor;
   const count = CONFIG.targetCount;
-  const baseR = target.r || targetRadius()*0.52;
+  const layout = bubbleLayoutBounds(anchor, target.r || targetRadius()*0.52, count);
+  const baseR = layout.r;
   target.bubbles = [];
-  const areaW = clamp(baseR*(Math.ceil(Math.sqrt(count))*3.45), baseR*5.5, canvas.width*0.86);
-  const areaH = clamp(baseR*(Math.ceil(count/Math.max(2,Math.ceil(Math.sqrt(count))))*3.25), baseR*4.8, canvas.height*0.58);
-  const left = clamp(anchor.x-areaW/2, baseR+16, canvas.width-baseR-16);
-  const right = clamp(anchor.x+areaW/2, baseR+16, canvas.width-baseR-16);
-  const top = clamp(anchor.y-baseR*.35, baseR+16, canvas.height-baseR-16);
-  const bottom = clamp(anchor.y+areaH, baseR+16, canvas.height-baseR-16);
-  let attempts=0;
-  let minGapFactor=1.55;
-  while(target.bubbles.length<count && attempts<3000){
-    attempts++;
-    if(attempts===1200) minGapFactor=1.35;
-    if(attempts===2200) minGapFactor=1.18;
-    const rr = baseR*(0.90 + Math.random()*0.20);
-    const x = clamp(left + Math.random()*Math.max(baseR*2,right-left), rr+16, canvas.width-rr-16);
-    const y = clamp(top + Math.random()*Math.max(baseR*2,bottom-top), rr+16, canvas.height-rr-16);
-    let ok=true;
-    for(const existing of target.bubbles){
-      const minD=(existing.r+rr)*minGapFactor;
-      if(Math.hypot(existing.x-x, existing.y-y) < minD){ ok=false; break; }
-    }
-    if(ok){ target.bubbles.push(makeAirBubble(`${targetSerial}_${target.bubbles.length}_${Math.random()}`, x, y, rr)); }
+  for(let i=0;i<count;i++){
+    const col=i%layout.cols, row=Math.floor(i/layout.cols);
+    const cellW = layout.cols<=1 ? 0 : layout.areaW/(layout.cols-1);
+    const cellH = layout.rows<=1 ? 0 : layout.areaH/(layout.rows-1);
+    const jitterX = (Math.random()*2-1)*baseR*0.18;
+    const jitterY = (Math.random()*2-1)*baseR*0.18;
+    const x = layout.cols===1 ? anchor.x : clamp(layout.left + col*cellW + jitterX, baseR+18, canvas.width-baseR-18);
+    const y = layout.rows===1 ? anchor.y : clamp(layout.top + row*cellH + jitterY, baseR+18, canvas.height-baseR-18);
+    const rr = baseR*(0.92 + Math.random()*0.10);
+    target.bubbles.push(makeAirBubble(`${targetSerial}_${i}_${Math.random()}`, x, y, rr));
   }
-  // Fallback grid if the screen is too small for the requested number.
-  let i=target.bubbles.length;
-  const cols=Math.max(2, Math.ceil(Math.sqrt(count)));
-  while(i<count){
-    const col=i%cols, row=Math.floor(i/cols);
-    const x=clamp(anchor.x + (col-(cols-1)/2)*baseR*2.65, baseR+16, canvas.width-baseR-16);
-    const y=clamp(anchor.y + row*baseR*2.55, baseR+16, canvas.height-baseR-16);
-    target.bubbles.push(makeAirBubble(`${targetSerial}_${i}_${Math.random()}`, x, y, baseR));
-    i++;
-  }
+  for(let pass=0; pass<18; pass++) separateBubbles(true);
   target.initialized = true;
 }
 function ensureAirBubbles(){
@@ -739,25 +785,54 @@ function ensureAirBubbles(){
     buildBubbleCluster();
   }
 }
+function separateBubbles(strong=false){
+  if(!target?.bubbles) return;
+  const list=target.bubbles.filter(b=>!b.popped);
+  for(let i=0;i<list.length;i++){
+    for(let j=i+1;j<list.length;j++){
+      const a=list[i], b=list[j];
+      let dx=b.x-a.x, dy=b.y-a.y;
+      let d=Math.hypot(dx,dy);
+      if(d<0.001){ dx=(Math.random()*2-1); dy=(Math.random()*2-1); d=Math.hypot(dx,dy); }
+      const minD=(a.r+b.r)*1.38;
+      if(d<minD){
+        const push=(minD-d)/(strong?1.6:2.2);
+        const nx=dx/d, ny=dy/d;
+        a.x-=nx*push; a.y-=ny*push; b.x+=nx*push; b.y+=ny*push;
+        a.baseX=a.x; a.baseY=a.y; b.baseX=b.x; b.baseY=b.y;
+        const avx=a.vx, avy=a.vy;
+        a.vx=-b.vx*0.75 || -nx*0.35; a.vy=-b.vy*0.75 || -ny*0.35;
+        b.vx=-avx*0.75 || nx*0.35; b.vy=-avy*0.75 || ny*0.35;
+      }
+    }
+  }
+  const anchor=target.anchor || bubbleAnchor();
+  const layout=bubbleLayoutBounds(anchor, target.r || targetRadius()*0.52, CONFIG.targetCount);
+  for(const b of list){
+    b.x=clamp(b.x,b.r+18,canvas.width-b.r-18); b.y=clamp(b.y,b.r+18,canvas.height-b.r-18);
+    b.baseX=clamp(b.baseX,layout.left-b.r,layout.right+b.r); b.baseY=clamp(b.baseY,layout.top-b.r,layout.bottom+b.r);
+  }
+}
 function moveAirBubbles(){
   if(!target?.bubbles) return;
   const anchor = bubbleAnchor();
   target.anchor = anchor;
+  const layout=bubbleLayoutBounds(anchor, target.r || targetRadius()*0.52, CONFIG.targetCount);
   for(const b of target.bubbles){
     if(b.popped) continue;
     b.shimmer += 0.04;
     if(CONFIG.speedScale>0){
       b.baseX += b.vx*0.35;
       b.baseY += b.vy*0.35;
-      const maxDX = target.r*2.4, maxDY = target.r*1.8;
-      b.baseX = clamp(b.baseX, anchor.x-maxDX, anchor.x+maxDX);
-      b.baseY = clamp(b.baseY, anchor.y-target.r*0.5, anchor.y+maxDY);
-      if(b.baseX<=anchor.x-maxDX || b.baseX>=anchor.x+maxDX) b.vx*=-1;
-      if(b.baseY<=anchor.y-target.r*0.5 || b.baseY>=anchor.y+maxDY) b.vy*=-1;
+      if(b.baseX<layout.left || b.baseX>layout.right) b.vx*=-1;
+      if(b.baseY<layout.top || b.baseY>layout.bottom) b.vy*=-1;
+      b.baseX = clamp(b.baseX, layout.left, layout.right);
+      b.baseY = clamp(b.baseY, layout.top, layout.bottom);
     }
-    b.x = lerp(b.x, b.baseX, 0.12);
-    b.y = lerp(b.y, b.baseY, 0.12);
+    b.x = lerp(b.x, b.baseX, 0.10);
+    b.y = lerp(b.y, b.baseY, 0.10);
   }
+  separateBubbles(false);
 }
 function nearestAirBubble(c){
   let best=null, bestD=Infinity;
@@ -771,36 +846,73 @@ function nearestAirBubble(c){
 function remainingBubbles(){
   return (target?.bubbles||[]).filter(b=>!b.popped).length;
 }
+function openGestureThreshold(){ return clamp(CONFIG.gestureThreshold*0.42, 0.10, 0.32); }
+function resetBubbleOpenGate(){ bubbleOpenReady=false; bubbleOpenStart=0; bubbleCandidateId=null; }
+function registerOpenHand(){
+  if(smoothedGesture <= openGestureThreshold()){
+    if(!bubbleOpenStart) bubbleOpenStart=now();
+    if(now()-bubbleOpenStart>280) bubbleOpenReady=true;
+  }else{
+    bubbleOpenStart=0; bubbleOpenReady=false;
+  }
+  return bubbleOpenReady;
+}
 function processHandBubbles(m){
   if(!target || target.kind!=='air_bubbles') spawnTaskTarget();
   ensureAirBubbles();
   moveAirBubbles();
   const c=cursorPx(m);
   const b=nearestAirBubble(c);
-  target.activeId = b ? b.id : null;
-  const g=smoothedGesture>=CONFIG.gestureThreshold;
+  const currentId=b ? b.id : null;
+  if(currentId!==bubbleCandidateId){
+    bubbleCandidateId=currentId;
+    holdStart=null;
+    if(currentId) bubbleOpenStart=0;
+  }
+  target.activeId = currentId;
+  const graspOK=smoothedGesture>=CONFIG.gestureThreshold;
+  const openOK=smoothedGesture<=openGestureThreshold();
   const remain = remainingBubbles();
   if(remain<=0){ completeGame(); return; }
   if(!b){
-    resetHold();
-    if(now()-lastStatusVoice>5200){speakText('stage_bubble_seek_'+score, `물방울 하나를 선택해 손바닥 중심을 물방울 안으로 천천히 가져가세요. 손은 아직 편 상태로 준비합니다. 남은 물방울은 ${remain}개입니다.`, false); lastStatusVoice=now();}
-    setInstruction('1단계: 물방울 하나에 손을 가져가세요',`얼굴 아래쪽에 퍼져 있는 남은 물방울 ${remain}개 중 하나 안으로 손을 천천히 이동합니다.`, 'info');
+    holdStart=null;
+    const ready=registerOpenHand();
+    if(!ready && now()-lastStatusVoice>5200){
+      speakText('stage_open_before_seek_'+score, `손을 먼저 편 상태로 준비하세요. 그 다음 물방울 하나를 선택해 천천히 이동합니다. 남은 물방울은 ${remain}개입니다.`, false);
+      lastStatusVoice=now();
+    }else if(ready && now()-lastStatusVoice>5200){
+      speakText('stage_bubble_seek_'+score, `좋습니다. 손을 편 상태로 물방울 하나에 천천히 가져가세요.`, false);
+      lastStatusVoice=now();
+    }
+    setInstruction(ready?'1단계: 물방울 하나에 손을 가져가세요':'준비: 먼저 손을 펴세요', ready?`남은 물방울 ${remain}개 중 하나 안으로 손바닥 중심을 천천히 이동합니다.`:`현재 손쥐기 점수 ${Math.round(smoothedGesture*100)}%. 손을 편 뒤 물방울로 이동해야 성공 판정이 시작됩니다.`, ready?'info':'warn');
     stage='air_seek'; state='air_bubble_seek'; return;
   }
-  if(!g){
-    resetHold();
-    speakText('stage_bubble_grasp_'+score, `물방울 안에 손이 들어왔습니다. 이제 손가락을 굽혀 손을 쥐세요. 손바닥 점만 닿아서는 성공하지 않습니다.`, false);
-    setInstruction('2단계: 손가락을 굽혀 쥐세요','손바닥 점이 닿는 것만으로는 성공하지 않습니다. 설정 기준 이상으로 손을 쥐어야 합니다.','action');
+  if(!bubbleOpenReady){
+    if(openOK){
+      bubbleOpenReady=true; bubbleOpenStart=now();
+      speakText('stage_open_confirmed_'+score, '손이 펴진 상태가 확인되었습니다. 이제 물방울 안에서 손가락을 굽혀 손을 쥐세요.', false);
+    }else{
+      holdStart=null;
+      if(now()-lastStatusVoice>4200){ speakText('stage_need_open_'+score, '손이 이미 쥐어진 상태입니다. 물방울을 터뜨리려면 먼저 손을 펴고, 그 다음 손가락을 굽혀 쥐어야 합니다.', false); lastStatusVoice=now(); }
+      setInstruction('먼저 손을 펴세요','손을 쥔 채 물방울에 닿으면 성공으로 기록하지 않습니다. 손을 편 뒤 다시 쥐세요.','warn');
+      stage='air_open_required'; state='air_bubble_open_required'; return;
+    }
+  }
+  if(!graspOK){
+    holdStart=null;
+    if(now()-lastStatusVoice>4200){ speakText('stage_bubble_grasp_'+score, `물방울 안에 손이 들어왔습니다. 이제 손가락을 굽혀 손을 쥐세요. 손쥐기 기준은 ${Math.round(CONFIG.gestureThreshold*100)}퍼센트입니다.`, false); lastStatusVoice=now(); }
+    setInstruction('2단계: 손가락을 굽혀 쥐세요',`손쥐기 점수 ${Math.round(smoothedGesture*100)}% / 기준 ${Math.round(CONFIG.gestureThreshold*100)}%`, 'action');
     stage='air_grasp'; state='air_bubble_grasp'; return;
   }
   if(!holdStart){ holdStart=now(); speakText('stage_bubble_hold_'+score, '좋습니다. 손을 쥔 상태를 그대로 유지하세요. 유지 시간이 채워지면 물방울이 터집니다.', false); }
   const hp=holdProgress();
-  setInstruction('3단계: 잡은 상태를 잠시 유지하세요',`물방울 터뜨리기 ${Math.round(clamp(hp,0,1)*100)}% · 남은 물방울 ${remain}개`, 'warn');
+  setInstruction('3단계: 잡은 상태를 잠시 유지하세요',`유지 ${Math.round(clamp(hp,0,1)*100)}% · 남은 물방울 ${remain}개`, 'warn');
   stage='air_hold'; state='air_bubble_hold';
   if(hp>=1 && !b.popped && !b.locked){
     b.locked = true;
     b.popped = true;
     target.lastPop={x:b.x,y:b.y,r:b.r};
+    resetBubbleOpenGate();
     onSuccess();
   }
 }

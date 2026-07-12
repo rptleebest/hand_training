@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v23")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v24")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -282,7 +282,7 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v23</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v24</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
@@ -445,7 +445,7 @@ let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundA
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v23 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v24 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -1030,7 +1030,7 @@ function addParticles(){ const pop=target?.lastPop || target; const px=(pop?.x||
 
 function processBubble(m){
   if(!target) spawnTaskTarget(); moveTarget(target);
-  const c=cursorPx(m); const inside=insidePoint(c,target,1.05); const g=smoothedGesture>=CONFIG.gestureThreshold || CONFIG.level===1;
+  const c=cursorPx(m); const inside=insidePoint(c,target,1.05); const g=smoothedGesture>=CONFIG.gestureThreshold;
   if(!inside){ resetHold(); if(now()-lastStatusVoice>4500){speakOnce('seek_target'); lastStatusVoice=now();} setInstruction(`1단계: ${CONFIG.exercise.targetName}에 손을 가져가세요`,'목표 안에 손이 들어가면 다음 단계 안내가 나옵니다.','info'); state='seek_target'; return; }
   if(!g){ resetHold(); speakOnce('now_gesture'); const action=CONFIG.exercise.gesture==='pinch'?'엄지와 검지를 맞대세요':CONFIG.exercise.gesture==='open'?'손을 충분히 펴세요':'손을 쥐세요'; setInstruction(`2단계: ${action}`,'목표 안에서 끝동작을 수행하고 잠시 유지합니다.','action'); state='do_gesture'; return; }
   beginHold(); const hp=holdProgress(); setInstruction('3단계: 끝동작을 잠시 유지하세요',`${Math.round(clamp(hp,0,1)*100)}%`, 'warn'); state='hold_gesture'; if(hp>=1) onSuccess();
@@ -1154,14 +1154,17 @@ function remainingBubbles(){
   return (target?.bubbles||[]).filter(b=>!b.popped).length;
 }
 function openGestureThreshold(){ return clamp(CONFIG.gestureThreshold*0.38, 0.08, 0.30); }
-function openReadyThreshold(){ return 0.42; }
-function graspReadyThreshold(){ return clamp(CONFIG.gestureThreshold*0.85, 0.08, 0.82); }
+function openReadyThreshold(){ return clamp(0.52 - (CONFIG.level-1)*0.025, 0.40, 0.55); }
+function graspReadyThreshold(){ return clamp(CONFIG.gestureThreshold*0.95, 0.16, 0.86); }
 function rawCloseScore(m){ return gestureScore(m, 'grasp'); }
 function rawOpenScore(m){ return gestureScore(m, 'open'); }
-function isHandOpenEnough(m){ return rawOpenScore(m) >= openReadyThreshold(); }
-function isHandGraspEnough(m){ return rawCloseScore(m) >= graspReadyThreshold(); }
+function openMaxCloseScore(){ return clamp(graspReadyThreshold()*0.58, 0.12, 0.38); }
+function graspMaxOpenScore(){ return 0.54; }
+function isHandOpenEnough(m){ return rawOpenScore(m) >= openReadyThreshold() && rawCloseScore(m) <= openMaxCloseScore(); }
+function isHandGraspEnough(m){ return rawCloseScore(m) >= graspReadyThreshold() && rawOpenScore(m) <= graspMaxOpenScore(); }
+function isCupGripEnough(m){ return isHandGraspEnough(m); }
 function resetBubbleOpenGate(){ bubbleOpenReady=false; bubbleOpenStart=0; bubbleCandidateId=null; }
-function registerOpenHand(m, minMs=500){
+function registerOpenHand(m, minMs=700){
   if(isHandOpenEnough(m)){
     if(!bubbleOpenStart) bubbleOpenStart=now();
     if(now()-bubbleOpenStart>=minMs) bubbleOpenReady=true;
@@ -1187,8 +1190,8 @@ function processHandBubbles(m){
   target.activeId = currentId;
   const closeScore=rawCloseScore(m);
   const openScore=rawOpenScore(m);
-  const graspOK=isHandGraspEnough(m);
   const openOK=isHandOpenEnough(m);
+  const graspOK=isHandGraspEnough(m);
   const remain = remainingBubbles();
   if(remain<=0){ completeGame(); return; }
   if(!b){
@@ -1196,33 +1199,33 @@ function processHandBubbles(m){
     bubbleOpenStart=0;
     bubbleOpenReady=false;
     if(now()-lastStatusVoice>5200){
-      speakText('stage_bubble_seek_'+score, `물방울 하나를 선택해서 손바닥 중심을 천천히 가져가세요. 물방울 안에 들어간 뒤 먼저 손을 편 상태를 확인하고, 그 다음 손을 쥡니다. 남은 물방울은 ${remain}개입니다.`, false);
+      speakText('stage_bubble_seek_'+score, `물방울 하나를 선택해서 손바닥 중심을 천천히 가져가세요. 물방울 안에 들어간 뒤 먼저 손을 충분히 펴고, 그 다음 손가락을 굽혀 쥡니다. 남은 물방울은 ${remain}개입니다.`, false);
       lastStatusVoice=now();
     }
-    setInstruction('1단계: 물방울 하나에 손을 가져가세요', `남은 물방울 ${remain}개 중 하나 안으로 손바닥 중심을 이동하세요. 손 편 점수 ${Math.round(openScore*100)}%, 손쥐기 점수 ${Math.round(closeScore*100)}%.`, 'info');
+    setInstruction('1단계: 물방울 하나에 손을 가져가세요', `남은 물방울 ${remain}개. 먼저 손 편 상태가 확인되어야 성공 단계로 넘어갑니다. 손 편 점수 ${Math.round(openScore*100)}%, 손쥐기 점수 ${Math.round(closeScore*100)}%.`, 'info');
     stage='air_seek'; state='air_bubble_seek'; return;
   }
   if(!bubbleOpenReady){
     if(openOK){
       if(!bubbleOpenStart) bubbleOpenStart=now();
-      const openPct = clamp((now()-bubbleOpenStart)/600,0,1);
-      setInstruction('2단계: 물방울 안에서 먼저 손을 펴세요', `손 편 상태 확인 ${Math.round(openPct*100)}%. 손 편 점수 ${Math.round(openScore*100)}% / 기준 ${Math.round(openReadyThreshold()*100)}%.`, 'warn');
+      const openPct = clamp((now()-bubbleOpenStart)/900,0,1);
+      setInstruction('2단계: 같은 물방울 안에서 먼저 손을 펴세요', `손 편 상태 확인 ${Math.round(openPct*100)}%. 손 편 점수 ${Math.round(openScore*100)}% / 기준 ${Math.round(openReadyThreshold()*100)}%, 손쥐기 점수 ${Math.round(closeScore*100)}% / 허용 ${Math.round(openMaxCloseScore()*100)}%.`, 'warn');
       stage='air_open_required'; state='air_bubble_open_required';
       if(openPct<1) return;
       bubbleOpenReady=true;
       holdStart=null;
-      speakText('stage_open_confirmed_'+score, '손이 펴진 상태가 확인되었습니다. 이제 같은 물방울 안에서 손가락을 굽혀 손을 쥐세요.', false);
+      speakText('stage_open_confirmed_'+score, '손이 충분히 펴진 상태가 확인되었습니다. 이제 같은 물방울 안에서 손가락을 굽혀 손을 쥐세요.', false);
     }else{
       bubbleOpenStart=0; holdStart=null;
-      if(now()-lastStatusVoice>4200){ speakText('stage_need_open_'+score, '물방울 안에서 먼저 손을 펴세요. 손을 이미 쥔 상태로 물방울에 닿으면 성공으로 기록하지 않습니다.', false); lastStatusVoice=now(); }
-      setInstruction('먼저 손을 펴세요', `물방울 안에서 손 편 상태가 먼저 확인되어야 합니다. 손 편 점수 ${Math.round(openScore*100)}% / 기준 ${Math.round(openReadyThreshold()*100)}%.`, 'warn');
+      if(now()-lastStatusVoice>4200){ speakText('stage_need_open_'+score, '먼저 손가락을 충분히 펴세요. 손을 이미 쥔 상태로 물방울에 닿은 뒤 구부리면 성공으로 기록하지 않습니다.', false); lastStatusVoice=now(); }
+      setInstruction('먼저 손가락을 충분히 펴세요', `손 편 상태가 먼저 확인되어야 합니다. 손 편 점수 ${Math.round(openScore*100)}% / 기준 ${Math.round(openReadyThreshold()*100)}%, 손쥐기 점수 ${Math.round(closeScore*100)}% / 허용 ${Math.round(openMaxCloseScore()*100)}%.`, 'warn');
       stage='air_open_required'; state='air_bubble_open_required'; return;
     }
   }
   if(!graspOK){
     holdStart=null;
-    if(now()-lastStatusVoice>4200){ speakText('stage_bubble_grasp_'+score, `좋습니다. 이제 손가락을 굽혀 손을 쥐세요. 손쥐기 기준은 ${Math.round(graspReadyThreshold()*100)}퍼센트입니다.`, false); lastStatusVoice=now(); }
-    setInstruction('3단계: 손가락을 굽혀 쥐세요', `손쥐기 점수 ${Math.round(closeScore*100)}% / 기준 ${Math.round(graspReadyThreshold()*100)}%. 손 편 확인 후 쥐기 단계입니다.`, 'action');
+    if(now()-lastStatusVoice>4200){ speakText('stage_bubble_grasp_'+score, `좋습니다. 이제 손가락을 굽혀 손을 쥐세요. 손을 편 상태에서 쥐는 변화가 확인되어야 물방울이 터집니다.`, false); lastStatusVoice=now(); }
+    setInstruction('3단계: 손가락을 굽혀 쥐세요', `손쥐기 점수 ${Math.round(closeScore*100)}% / 기준 ${Math.round(graspReadyThreshold()*100)}%, 손 편 점수 ${Math.round(openScore*100)}% / 허용 ${Math.round(graspMaxOpenScore()*100)}%.`, 'action');
     stage='air_grasp'; state='air_bubble_grasp'; return;
   }
   if(!holdStart){ holdStart=now(); speakText('stage_bubble_hold_'+score, '좋습니다. 손을 쥔 상태를 그대로 유지하세요. 유지 시간이 채워지면 물방울이 터집니다.', false); }
@@ -1274,30 +1277,40 @@ function mouthReady(){
   return !!(target?.mouth?.actual) || (now()-mouthDetectedAt<1200);
 }
 function processCupDrink(m){
-  const c=cursorPx(m); const cup=target.cup, mouth=target.mouth; const g=smoothedGesture>=CONFIG.gestureThreshold || CONFIG.level===1;
+  const c=cursorPx(m); const cup=target.cup, mouth=target.mouth;
+  const closeScore=rawCloseScore(m);
+  const openScore=rawOpenScore(m);
+  const gripOK=isCupGripEnough(m);
   const home = {x:cup.homeX, y:cup.homeY, r:cup.r*1.10};
+  function releaseCup(reason='손이 펴져 컵을 놓았습니다.'){
+    cup.attached=false; cup.x=cup.homeX; cup.y=cup.homeY; holdStart=null; stage='cup_reach'; state='cup_reach';
+    if(now()-lastStatusVoice>2500){ speakText('cup_released_'+targetSerial, `${reason} 다시 탁자 위 물컵을 손으로 쥐어 잡으세요.`, false); lastStatusVoice=now(); }
+    setInstruction('컵을 놓았습니다', `${reason} 물컵은 원래 위치로 돌아갑니다. 손쥐기 점수 ${Math.round(closeScore*100)}% / 기준 ${Math.round(graspReadyThreshold()*100)}%.`, 'warn');
+  }
   if(stage==='cup_reach'){
     cup.attached=false; cup.x=cup.homeX; cup.y=cup.homeY;
     if(!insidePoint(c,home,1.02)){ resetHold(); speakOnce('cup_reach'); setInstruction('1단계: 탁자 위 물컵으로 손을 가져가세요','화면 하단 탁자 위 물컵 안으로 손바닥 중심을 천천히 이동합니다.','info'); return; }
-    if(!g){ resetHold(); speakOnce('cup_grasp'); setInstruction('2단계: 물컵을 잡으세요','물컵 안에서 손을 쥐고 유지하면 컵을 잡은 것으로 인식합니다.','action'); return; }
-    beginHold(); setInstruction('물컵을 잡은 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
-    if(holdProgress()>=1){ cup.attached=true; stage='cup_to_mouth'; resetHold(); speakText('stage_cup_to_mouth_'+targetSerial, '좋습니다. 이제 물이 담긴 컵을 실제 입 위치까지 천천히 옮기세요. 입 위치에 도착하면 잠시 멈춥니다.', true); }
+    if(!gripOK){ resetHold(); speakOnce('cup_grasp'); setInstruction('2단계: 물컵을 손으로 쥐어 잡으세요',`손을 편 상태에서는 컵이 움직이지 않습니다. 손쥐기 점수 ${Math.round(closeScore*100)}% / 기준 ${Math.round(graspReadyThreshold()*100)}%, 손 편 점수 ${Math.round(openScore*100)}% / 허용 ${Math.round(graspMaxOpenScore()*100)}%.`, 'action'); return; }
+    beginHold(); setInstruction('물컵을 쥔 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
+    if(holdProgress()>=1){ cup.attached=true; stage='cup_to_mouth'; state='cup_to_mouth'; resetHold(); speakText('stage_cup_to_mouth_'+targetSerial, '좋습니다. 컵을 잡았습니다. 손을 쥔 상태를 유지하면서 물이 담긴 컵을 실제 입 위치까지 천천히 옮기세요.', true); }
     return;
   }
   if(stage==='cup_to_mouth'){
+    if(!gripOK){ releaseCup('손쥐기 동작이 풀렸습니다.'); return; }
     cup.attached=true; cup.x=c.x; cup.y=c.y;
-    if(!mouthReady()){ resetHold(); setInstruction('입 위치가 보이도록 얼굴을 보여 주세요','얼굴과 입 주변이 화면에 보이면 실제 입 위치 목표가 표시됩니다.','warn'); return; }
-    if(!insidePoint(c,mouth,.95)){ resetHold(); setInstruction('3단계: 물컵을 실제 입 위치로 옮기세요', mouth.actual?'파란 원은 현재 화면에서 인식된 실제 입 위치입니다.':'파란 원은 입 위치 추정 목표입니다.', 'drink'); return; }
-    beginHold(); speakOnce('cup_drink_hold'); setInstruction('입 위치에서 잠시 멈추세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
+    if(!mouthReady()){ resetHold(); setInstruction('입 위치가 보이도록 얼굴을 보여 주세요','얼굴과 입 주변이 화면에 보이면 실제 입 위치 목표가 표시됩니다. 컵은 손을 쥔 상태에서만 이동합니다.','warn'); return; }
+    if(!insidePoint(c,mouth,.95)){ resetHold(); setInstruction('3단계: 컵을 쥔 상태로 실제 입 위치로 옮기세요', mouth.actual?'파란 원은 현재 화면에서 인식된 실제 입 위치입니다.':'파란 원은 입 위치 추정 목표입니다.', 'drink'); return; }
+    beginHold(); speakOnce('cup_drink_hold'); setInstruction('입 위치에서 컵을 쥔 상태로 잠시 멈추세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
     if(holdProgress()>=1){
-      cup.filled=false; cup.returnReady=true; stage='cup_return'; resetHold();
-      speakText('stage_cup_return_'+targetSerial, '좋습니다. 물을 마셨습니다. 이제 빈 컵을 원래 탁자 위 위치로 천천히 가져가세요. 원래 위치에 놓고 잠시 유지하면 성공입니다.', true);
+      cup.filled=false; cup.returnReady=true; stage='cup_return'; state='cup_return'; resetHold();
+      speakText('stage_cup_return_'+targetSerial, '좋습니다. 물을 마셨습니다. 계속 컵을 쥔 상태로 빈 컵을 원래 탁자 위 위치로 천천히 가져가세요. 원래 위치에 놓고 잠시 유지하면 성공입니다.', true);
     }
     return;
   }
   if(stage==='cup_return'){
+    if(!gripOK){ releaseCup('컵을 돌려놓기 전에 손쥐기 동작이 풀렸습니다.'); return; }
     cup.attached=true; cup.x=c.x; cup.y=c.y;
-    if(!insidePoint(c,home,1.02)){ resetHold(); setInstruction('4단계: 빈 컵을 원래 위치로 가져가세요','하단 탁자 위 밝은 받침 위치에 컵을 다시 놓아 주세요.','drink'); return; }
+    if(!insidePoint(c,home,1.02)){ resetHold(); setInstruction('4단계: 빈 컵을 원래 위치로 가져가세요','하단 탁자 위 밝은 받침 위치에 컵을 다시 놓아 주세요. 컵은 손을 쥔 상태에서만 따라옵니다.','drink'); return; }
     beginHold(); setInstruction('원래 위치에 컵을 놓고 잠시 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
     if(holdProgress()>=1){
       cup.attached=false; cup.x=cup.homeX; cup.y=cup.homeY; resetHold(); onSuccess();

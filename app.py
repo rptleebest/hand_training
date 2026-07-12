@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v22")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v23")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -180,7 +180,7 @@ with st.sidebar:
         index=2,
         disabled=(cup_position_mode != "manual"),
     )
-    table_height = st.slider("탁자 높이 위치", min_value=0.76, max_value=0.94, value=0.91, step=0.01, help="값이 클수록 화면 아래쪽에 탁자가 배치됩니다.")
+    table_height = st.slider("탁자 높이 위치", min_value=0.76, max_value=0.94, value=0.92, step=0.01, help="값이 클수록 화면 아래쪽에 탁자가 배치됩니다.")
     speed_scale = st.slider("물방울/공기방울/물컵 속도 보정", min_value=0.00, max_value=6.00, value=1.00, step=0.25, help="0은 정지, 1은 표준 속도, 6은 빠른 이동입니다. v12에서는 속도 차이가 확실히 보이도록 비선형으로 적용됩니다.")
     st.divider()
     robustness = st.slider("손 떨림 보정/움직임 안정화", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
@@ -282,7 +282,7 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v22</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v23</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
@@ -439,13 +439,13 @@ let state='idle', score=0, attempts=0, successes=0, failureCount=0, reactionTime
 let target=null, stage='none', holdStart=null, overlapStart=null, reactionStart=null, lastStatusVoice=0;
 let targetSerial=0, lastStepId='', stepStartedAt=0, lastFailureAt=0;
 let bubbleOpenReady=false, bubbleOpenStart=0, bubbleCandidateId=null;
-let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0, calVoiceMilestone=-1, combinedCalActive=false, calDurationMs=3000, calStepId=0, calWaitingForStart=false;
+let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0, calVoiceMilestone=-1, combinedCalActive=false, calDurationMs=3000, calStepId=0, calWaitingForStart=false, calPrepTimer=null, calPrepEnd=0, calPrepMode=null;
 let hideHandLandmarksUntil=0;
 let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundAt=0, neutralTilt=null;
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v22 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v23 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -460,7 +460,9 @@ function setInstruction(big, sub='', kind='info'){
 function log(msg){ ui.log.textContent=msg; }
 
 function updateVoiceStatus(text){ if(ui.voice) ui.voice.textContent=text; }
+function clearCalibrationTimers(){ try{ if(calPrepTimer){ clearInterval(calPrepTimer); calPrepTimer=null; } }catch(e){} calPrepEnd=0; calPrepMode=null; }
 function stopAllSpeech(status='음성 중단'){
+  clearCalibrationTimers();
   speechGeneration++;
   try{ calStepId++; }catch(e){}
   speechQueue=[];
@@ -581,13 +583,15 @@ function speakText(key, text, force=false){
   playMessage(key,text);
 }
 function estimateSpeechDurationMs(text){
+  if(CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only') return 900;
   const len=String(text||'').replace(/\s+/g,'').length;
-  return clamp(1800 + len*85, 2600, 9000);
+  // Conservative delay: measurement or target presentation must not start before the spoken guide is likely finished.
+  return clamp(1600 + len*120, 2600, 17000);
 }
 function speakTextWithCallback(key, text, force=false, callback=null){
   speakText(key, text, force);
   const myGen=speechGeneration;
-  const delay=estimateSpeechDurationMs(text);
+  const delay=estimateSpeechDurationMs(text) + 700;
   setTimeout(()=>{
     if(myGen!==speechGeneration) return;
     if(typeof callback==='function') callback();
@@ -614,7 +618,7 @@ function fallbackSpeechOrTone(text,key){
 }
 function enqueueSpeech(text,key){
   const gen=speechGeneration;
-  const important = key.startsWith('task_intro') || key.startsWith('task_begin') || key.startsWith('complete') || key.startsWith('fail') || key==='sound_test';
+  const important = key.startsWith('task_intro') || key.startsWith('task_begin') || key.startsWith('complete') || key.startsWith('fail') || key.startsWith('finger_cal') || key.startsWith('training') || key==='sound_test';
   if(important){
     window.speechSynthesis?.cancel?.();
     speechActive=false;
@@ -734,22 +738,31 @@ function startTraining(){
     speakText('need_camera_train','먼저 카메라만 켜기 버튼을 누르세요. 카메라가 켜진 뒤 보정과 훈련을 시작할 수 있습니다.',true);
     return;
   }
-  if(calMode){
-    setInstruction('보정이 진행 중입니다','보정이 끝난 뒤 ⑤ 훈련 시작 버튼을 누르세요.','warn');
+  if(combinedCalActive || calMode || calWaitingForStart){
+    setInstruction('보정이 진행 중입니다','보정이 끝난 뒤 ④ 훈련 시작 버튼을 누르세요.','warn');
     speakText('wait_cal_done','보정이 진행 중입니다. 보정이 끝난 뒤 훈련 시작 버튼을 누르세요.',true);
     return;
   }
   const calibrated = !!(openMetrics && closeMetrics);
+  const run=trainingRunId;
   paused=false;
-  trainingActive=true;
-  target=null;
-  particles=[];
-  if(!calibrated){
-    speakText('auto_gesture_training','손가락 동작 보정 없이 자동 손동작 기준으로 훈련을 시작합니다. 손동작 인정 기준을 낮추면 작은 손가락 굽힘도 더 쉽게 인정됩니다.', true);
-  }else{
-    speakText('calibrated_gesture_training','환자별 손가락 동작 보정 기준으로 훈련을 시작합니다.', true);
-  }
-  resetGame(true);
+  trainingActive=false;
+  target=null; particles=[]; holdStart=null; successLock=false;
+  stage='training_instruction'; state='training_instruction'; updateUI();
+  const modeText = calibrated ? '환자별 손가락 동작 보정 기준으로 훈련합니다.' : '손가락 동작 보정 없이 자동 손동작 기준으로 훈련합니다. 필요하면 손동작 인정 기준을 낮춰 작은 움직임도 인정할 수 있습니다.';
+  const intro = `${modeText} ${taskIntroText()} 안내가 끝난 뒤 화면에 목표물이 나타납니다. 안내 중에는 아직 측정하거나 성공으로 기록하지 않습니다.`;
+  setInstruction('훈련 안내 중','아직 목표물을 표시하지 않습니다. 음성 안내가 끝난 뒤 훈련이 시작됩니다.','warn');
+  speakTextWithCallback('task_intro_'+run, intro, true, ()=>{
+    if(run!==trainingRunId || !running || paused || combinedCalActive) return;
+    stage='training_prepare'; state='training_prepare'; target=null; particles=[]; updateUI();
+    setInstruction('훈련 시작 준비','잠시 후 목표물이 나타납니다. 준비 자세를 유지하세요.','warn');
+    speakText('training_start_now_'+run, '이제 훈련을 시작합니다. 목표물이 나타나면 화면 안내에 따라 움직이세요.', true);
+    setTimeout(()=>{
+      if(run!==trainingRunId || !running || paused || combinedCalActive) return;
+      resetGame(false);
+      speakText('rep_start_'+targetSerial, taskStartText(), true);
+    }, CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only' ? 900 : 2800);
+  });
 }
 
 function abortTraining(){
@@ -810,39 +823,52 @@ function startFingerCalibration(){
     speakText('cal_need_camera', '먼저 카메라만 켜기 버튼을 누른 뒤 손가락 동작 보정을 진행하세요.', true);
     return;
   }
-  trainingActive=false; paused=false; target=null; particles=[]; stage='calibration_instruction'; holdStart=null; resetBubbleOpenGate();
+  trainingActive=false; paused=false; target=null; particles=[]; stage='calibration_instruction'; holdStart=null; resetBubbleOpenGate(); clearCalibrationTimers();
   combinedCalActive=true; calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_open_instruction'; resetCalProgress(); updateUI();
   const id=calStepId;
-  const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락 펴기 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 펼 준비를 하세요. 화면에 이제 시작하세요 문구와 음성이 나온 뒤에 진행 바가 올라가면, 그때부터 3초 동안 손가락을 편 상태로 유지합니다.';
-  setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝나고 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
-  speakText('finger_cal_open_explain_'+id, explain, true);
-  setTimeout(()=>{
+  const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락 펴기 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 펼 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
+  setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
+  speakTextWithCallback('finger_cal_open_explain_'+id, explain, true, ()=>{
     if(!calibrationScheduleGuard(id)) return;
-    setInstruction('손가락 동작 보정: 손 펴기 준비','곧 측정이 시작됩니다. 진행 바가 올라갈 때부터 손가락을 최대한 펴고 유지하세요.','warn');
-    speakText('finger_cal_open_now_'+id, '이제 시작하세요. 손가락을 최대한 편 상태로 유지하세요.', true);
-    setTimeout(()=>{ if(calibrationScheduleGuard(id)) beginCalibrationMeasurement('open'); }, 2300);
-  }, 9000);
+    beginCalibrationPrepare('open', id);
+  });
 }
-function beginCalibrationMeasurement(mode){
-  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; calWaitingForStart=false; resetCalProgress();
+function beginCalibrationPrepare(mode, id){
+  clearCalibrationTimers();
+  if(!calibrationScheduleGuard(id)) return;
+  calMode=null; calSamples=[]; calWaitingForStart=true; calPrepMode=mode; stage='calibration_prepare'; state=mode==='open'?'cal_open_prepare':'cal_close_prepare'; resetCalProgress();
+  const modeName = mode==='open' ? '손 펴기' : '손 쥐기';
+  const action = mode==='open' ? '손가락을 최대한 편 상태' : '손가락을 최대한 구부려 쥔 상태';
+  setInstruction(`손가락 동작 보정: ${modeName} 준비`, '아직 측정하지 않습니다. “이제 시작하세요” 안내 뒤 3초 준비 시간이 지나면 진행 바가 올라갑니다.', 'warn');
+  speakText('finger_cal_'+mode+'_now_'+id, `이제 시작하세요. ${action}로 준비하세요. 진행 바가 올라가기 시작하면 3초 동안 그대로 유지하세요.`, true);
+  calPrepEnd = now() + (CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only' ? 1500 : 3600);
+  calPrepTimer=setInterval(()=>{
+    if(!calibrationScheduleGuard(id)){ clearCalibrationTimers(); return; }
+    const remain=Math.max(0, (calPrepEnd-now())/1000);
+    resetCalProgress();
+    setInstruction(`손가락 동작 보정: ${modeName} 측정 준비`, `측정 시작까지 ${remain.toFixed(1)}초. 아직 측정하지 않습니다.`, 'warn');
+    if(remain<=0){ clearCalibrationTimers(); beginCalibrationMeasurement(mode, id); }
+  }, 120);
+}
+function beginCalibrationMeasurement(mode, id=calStepId){
+  if(!calibrationScheduleGuard(id)) return;
+  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; calWaitingForStart=false; clearCalibrationTimers(); resetCalProgress();
   state=mode==='open'?'cal_open_count':'cal_close_count';
   stage='calibration_measure';
   const title = mode==='open' ? '손 펴기 측정 중' : '손 쥐기 측정 중';
-  const sub = mode==='open' ? '지금부터 측정 중입니다. 손가락을 최대한 편 상태로 유지하세요. 진행 바 100%에서 인식됩니다.' : '지금부터 측정 중입니다. 손가락을 최대한 구부려 쥔 상태로 유지하세요. 진행 바 100%에서 인식됩니다.';
-  setInstruction(`손가락 동작 보정: ${title}`, sub, 'warn');
+  const sub = mode==='open' ? '지금부터 실제 측정 중입니다. 손가락을 최대한 편 상태로 유지하세요.' : '지금부터 실제 측정 중입니다. 손가락을 최대한 구부려 쥔 상태로 유지하세요.';
+  setInstruction(`손가락 동작 보정: ${title}`, `${sub} 진행 바가 100%가 되면 인식됩니다.`, 'warn');
 }
 function beginCloseCalibrationInstruction(){
+  clearCalibrationTimers();
   calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_close_instruction'; stage='calibration_instruction'; resetCalProgress();
   const id=calStepId;
-  const explain = '이번에는 손가락 굽힘 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 구부릴 준비를 하세요. 화면에 이제 시작하세요 문구와 음성이 나온 뒤에 진행 바가 올라가면, 그때부터 3초 동안 손가락을 구부린 상태로 유지합니다.';
-  setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝나고 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
-  speakText('finger_cal_close_explain_'+id, explain, true);
-  setTimeout(()=>{
+  const explain = '이번에는 손가락 굽힘 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 구부릴 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
+  setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
+  speakTextWithCallback('finger_cal_close_explain_'+id, explain, true, ()=>{
     if(!calibrationScheduleGuard(id)) return;
-    setInstruction('손가락 동작 보정: 손 쥐기 준비','곧 측정이 시작됩니다. 진행 바가 올라갈 때부터 손가락을 최대한 구부려 유지하세요.','warn');
-    speakText('finger_cal_close_now_'+id, '이제 시작하세요. 손가락을 최대한 구부린 상태로 유지하세요.', true);
-    setTimeout(()=>{ if(calibrationScheduleGuard(id)) beginCalibrationMeasurement('close'); }, 2300);
-  }, 8300);
+    beginCalibrationPrepare('close', id);
+  });
 }
 
 function chooseHand(result){
@@ -914,8 +940,11 @@ function mouthRadius(base){ return Math.max(18, base*(Number(CONFIG.mouthTargetS
 function cupHomePosition(r){
   const mode = CONFIG.cupPositionMode || 'auto_by_hand';
   const preset = CONFIG.cupPositionPreset || 'right_lower';
-  const tableY = canvas.height * Math.max(0.88, Number(CONFIG.tableHeight)||0.90);
-  const yy = clamp(tableY - r*0.02, canvas.height*0.76, canvas.height*0.91);
+  const tableY = canvas.height * (Number(CONFIG.tableHeight)||0.92);
+  const tableH = canvas.height*0.16;
+  const tableTop = tableY - tableH*0.28;
+  const cupR = r*0.76;
+  const yy = clamp(tableTop - cupR*0.02, canvas.height*0.66, canvas.height*0.88);
   let xRatio = 0.72;
   if(mode==='manual'){
     if(preset==='left_lower') xRatio = 0.24;
@@ -929,7 +958,7 @@ function cupHomePosition(r){
     const fallbackRight = CONFIG.mirrorView ? 0.73 : 0.76;
     xRatio = isLeft ? fallbackLeft : (isRight ? fallbackRight : 0.72);
   }
-  return {x:canvas.width*xRatio, y:yy, r:r*0.72};
+  return {x:canvas.width*xRatio, y:yy, r:cupR, tableY};
 }
 function randomTarget(r){ const margin=r+28; return {x:margin+Math.random()*Math.max(20,canvas.width-margin*2), y:margin+Math.random()*Math.max(20,canvas.height-margin*2), r, vx:(Math.random()*2-1)*CONFIG.levelConfig.speed*CONFIG.speedScale, vy:(Math.random()*2-1)*CONFIG.levelConfig.speed*CONFIG.speedScale}; }
 function mouthFallback(r){ const rr = mouthRadius(r*.78); return {x:canvas.width*.74,y:canvas.height*.25,r:rr,actual:false}; }
@@ -937,7 +966,7 @@ function spawnTaskTarget(){
   const r=targetRadius(); const type=CONFIG.exercise.taskType;
   holdStart=null; overlapStart=null; reactionStart=now(); successLock=false; targetSerial++; lastStepId=''; stepStartedAt=now();
   if(type==='bubble'){ target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
-  else if(type==='cup_drink'){ const home=cupHomePosition(r); target={cup:{x:home.x,y:home.y,r:home.r,attached:false,filled:true,homeX:home.x,homeY:home.y,returnReady:false}, mouth:mouthFallback(r), table:{y:canvas.height*0.88}}; stage='cup_reach'; state='cup_reach'; }
+  else if(type==='cup_drink'){ const home=cupHomePosition(r); target={cup:{x:home.x,y:home.y,r:home.r,attached:false,filled:true,homeX:home.x,homeY:home.y,returnReady:false}, mouth:mouthFallback(r), table:{y:home.tableY}}; stage='cup_reach'; state='cup_reach'; }
   else if(type==='hand_bubbles'){ resetBubbleOpenGate(); target={kind:'air_bubbles', bubbles:[], initialized:false, lastPop:null, activeId:null, anchor:{x:canvas.width*.50,y:canvas.height*.34}, r:r*.52}; stage='air_seek'; state='air_bubble_seek'; }
   else { target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
 }
@@ -977,8 +1006,8 @@ function onFailure(reason='잘못 수행되었습니다.'){
 function checkStepTimeout(){
   const id = stage + '|' + state;
   if(id!==lastStepId){ lastStepId=id; stepStartedAt=now(); }
-  const active = ['do_gesture','hold_gesture','cup_reach','cup_to_mouth','air_bubble_seek','air_bubble_grasp','air_bubble_hold'];
-  const isActive = active.includes(state) || ['cup_reach','cup_to_mouth','air_seek','air_hold'].includes(stage);
+  const active = ['do_gesture','hold_gesture','cup_reach','cup_to_mouth','cup_return','air_bubble_seek','air_bubble_grasp','air_bubble_hold'];
+  const isActive = active.includes(state) || ['cup_reach','cup_to_mouth','cup_return','air_seek','air_hold'].includes(stage);
   if(isActive && now()-stepStartedAt > CONFIG.stepTimeoutMs){
     onFailure('현재 단계가 오래 지속되었습니다.');
   }
@@ -1312,12 +1341,20 @@ function processGame(m,handed,handScore){
   if(combinedCalActive){
     if(calMode){ processCalibration(m); }
     else if(calWaitingForStart){
-      setInstruction(state==='cal_close_instruction'?'손 쥐기 측정 준비':'손 펴기 측정 준비','아직 측정하지 않습니다. 음성 안내와 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
+      if(stage==='calibration_prepare'){
+        const modeName = calPrepMode==='close' ? '손 쥐기' : '손 펴기';
+        const remain = calPrepEnd ? Math.max(0,(calPrepEnd-now())/1000) : 0;
+        resetCalProgress();
+        setInstruction(`손가락 동작 보정: ${modeName} 측정 준비`, `측정 시작까지 ${remain.toFixed(1)}초. 아직 측정하지 않습니다.`, 'warn');
+      }else{
+        setInstruction(state==='cal_close_instruction'?'손 쥐기 설명 중':'손 펴기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝난 뒤 준비 시간이 지나야 진행 바가 올라갑니다.','warn');
+      }
     }
     return;
   }
   if(!trainingActive){
     target=null; particles=[];
+    if(stage==='training_instruction' || stage==='training_prepare'){ return; }
     if(!calMode && state!=='camera_only_ready'){
       state='camera_only_ready'; stage='camera_only_ready';
       setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ④ 훈련 시작 버튼을 눌러야 물방울 또는 물컵 과제가 나타납니다.','ready');
@@ -1353,8 +1390,7 @@ function processCalibration(m){
     openMetrics=avg; updateCalibrationStatus(); playCalibrationBeepDone();
     setInstruction('손 펴기 100% 인식되었습니다', `손 편 기준 ${openMetrics.fingertipAvg.toFixed(2)} 저장 완료. 다음은 손 쥐기 보정입니다.`, 'ready');
     const openDoneId = calStepId;
-    speakText('finger_cal_open_done_'+openDoneId, '100퍼센트. 손가락 펴기 동작이 인식되었습니다. 다음은 손가락 굽힘 동작입니다.', true);
-    setTimeout(()=>{ if(combinedCalActive && openDoneId===calStepId) beginCloseCalibrationInstruction(); }, 4200);
+    speakTextWithCallback('finger_cal_open_done_'+openDoneId, '100퍼센트. 손가락 펴기 동작이 인식되었습니다. 다음은 손가락 굽힘 동작입니다.', true, ()=>{ if(combinedCalActive && openDoneId===calStepId) beginCloseCalibrationInstruction(); });
     return;
   }
   closeMetrics=avg;
@@ -1644,14 +1680,14 @@ function drawTargets(){
   if(target.pitcher) drawPitcher(target.pitcher);
   if(target.mouth) drawMouth(target.mouth);
 }
-function drawParticles(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }
+function drawParticles(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }
 function drawHand(lm){ const con=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.strokeStyle='rgba(51,209,122,.95)'; ctx.fillStyle='#33d17a'; ctx.lineWidth=3; for(const [a,b] of con){ ctx.beginPath(); ctx.moveTo(lm[a].x*canvas.width,lm[a].y*canvas.height); ctx.lineTo(lm[b].x*canvas.width,lm[b].y*canvas.height); ctx.stroke(); } for(let i=0;i<lm.length;i++){ const r=[4,8,12,16,20].includes(i)?6:4; ctx.beginPath(); ctx.arc(lm[i].x*canvas.width,lm[i].y*canvas.height,r,0,Math.PI*2); ctx.fill(); } }
 function renderLoop(){
   if(!running)return; animationId=requestAnimationFrame(renderLoop);
   if(paused||!handLandmarker||video.readyState<2){ drawScene(null,null); return; }
   try{
     if(video.currentTime===lastVideoTime)return; lastVideoTime=video.currentTime; const frameTime=performance.now(); const result=handLandmarker.detectForVideo(video,frameTime); const faceResult=faceLandmarker?faceLandmarker.detectForVideo(video,frameTime):null; updateMouthTargetFromFace(faceResult); const hand=chooseHand(result);
-    if(!hand){ if(now()-lastHandFoundAt>2500)speakOnce('hand_not_found'); if(['cup_to_mouth','air_hold','hold_gesture'].includes(stage) || ['hold_gesture','do_gesture','air_bubble_hold'].includes(state)){ if(now()-lastHandFoundAt>5000) onFailure('손이 화면에서 사라졌습니다.'); } setInstruction('손이 보이지 않습니다','손 전체가 화면에 들어오도록 조정하세요.','bad'); drawScene(null,null); updateUI(); return; }
+    if(!hand){ if((trainingActive || calMode) && now()-lastHandFoundAt>2500)speakOnce('hand_not_found'); if(['cup_to_mouth','air_hold','hold_gesture'].includes(stage) || ['hold_gesture','do_gesture','air_bubble_hold'].includes(state)){ if(now()-lastHandFoundAt>5000) onFailure('손이 화면에서 사라졌습니다.'); } setInstruction('손이 보이지 않습니다','손 전체가 화면에 들어오도록 조정하세요.','bad'); drawScene(null,null); updateUI(); return; }
     if(hand.wrongHand){ speakOnce('wrong_hand'); setInstruction('선택한 손이 아닙니다','설정한 훈련 손을 카메라 앞에 보여 주세요.','bad'); drawScene(hand,null); return; }
     lastHandFoundAt=now(); const m=handMetrics(hand.landmarks); if(hand.score<CONFIG.minHandConfidence){ speakOnce('low_quality'); setInstruction('손 인식이 불안정합니다','조명, 손 가림, 카메라 각도를 조정하세요.','bad'); }
     processGame(m,hand.handed,hand.score); drawScene(hand,m); updateUI();

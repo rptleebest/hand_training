@@ -37,16 +37,23 @@ def load_audio_assets() -> dict[str, dict[str, str]]:
         assets[path.stem] = {"mime": mime, "data": f"data:{mime};base64,{data}"}
     return assets
 
+IMAGE_DIR = APP_DIR / "assets" / "images"
+
+def load_image_assets() -> dict[str, str]:
+    """Load high-quality PNG sprites for more photo-like canvas graphics."""
+    assets: dict[str, str] = {}
+    if not IMAGE_DIR.exists():
+        return assets
+    for path in IMAGE_DIR.iterdir():
+        if not path.is_file() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        mime = mimetypes.guess_type(path.name)[0] or "image/png"
+        data = base64.b64encode(path.read_bytes()).decode("ascii")
+        assets[path.stem] = f"data:{mime};base64,{data}"
+    return assets
+
 
 EXERCISES = {
-    "bubble_grasp": {
-        "label": "물방울 잡아 터뜨리기: 손 쥐기",
-        "taskType": "bubble",
-        "gesture": "grasp",
-        "targetName": "물방울",
-        "description": "손바닥 중심을 물방울에 가져간 뒤 손을 쥐면 성공합니다.",
-        "clinicalGoal": "큰 물체 잡기, 손가락 굴곡, gross grasp 피드백",
-    },
     "bubble_pinch": {
         "label": "작은 물방울 집어 터뜨리기: 엄지-검지 집기",
         "taskType": "bubble",
@@ -134,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v17")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v22")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -143,7 +150,7 @@ with st.sidebar:
         "훈련 과제",
         options=list(EXERCISES.keys()),
         format_func=lambda k: EXERCISES[k]["label"],
-        index=4,
+        index=3,
     )
     affected_hand = st.radio(
         "훈련 손",
@@ -153,11 +160,27 @@ with st.sidebar:
     )
     level = st.slider("난이도", min_value=1, max_value=5, value=2, step=1)
     level_cfg = LEVELS[level]
-    target_count = st.slider("목표 물방울/공기방울/과제 수", min_value=3, max_value=30, value=level_cfg["targetCount"], step=1)
+    target_count = st.slider("목표 물방울/공기방울/반복 수", min_value=3, max_value=30, value=level_cfg["targetCount"], step=1)
     hold_ms = st.slider("끝동작 유지 시간(ms)", min_value=200, max_value=2500, value=level_cfg["holdMs"], step=50)
     step_timeout_sec = st.slider("단계별 재시도 안내 시간(초)", min_value=10, max_value=60, value=30, step=5)
     gesture_threshold = st.slider("손동작 인정 기준", min_value=0.05, max_value=0.95, value=float(level_cfg["gestureThreshold"]), step=0.05, help="낮을수록 작은 손가락 굽힘도 성공으로 인정하고, 높을수록 더 분명한 손 쥐기 동작이 필요합니다.")
     target_size_scale = st.slider("물방울/공기방울/물컵 크기 보정", min_value=0.60, max_value=1.80, value=1.00, step=0.05)
+    mouth_target_scale = st.slider("입 위치 목표 원 크기 보정", min_value=0.60, max_value=1.80, value=1.00, step=0.05, help="물컵을 입으로 가져가는 훈련에서 입 위치 원의 크기를 환자 상태에 맞게 조절합니다.")
+    cup_position_mode = st.selectbox(
+        "물컵/탁자 위치 설정",
+        options=["auto_by_hand", "manual"],
+        format_func=lambda v: {"auto_by_hand": "자동: 훈련 손 방향에 배치", "manual": "수동 선택"}[v],
+        index=0,
+        help="기본은 훈련 손의 앞쪽 아래 위치에 자동 배치하는 것이 재활 훈련 흐름에 가장 자연스럽습니다. 필요 시 수동으로 위치를 바꿀 수 있습니다.",
+    )
+    cup_position_preset = st.selectbox(
+        "수동 위치",
+        options=["left_lower", "center_lower", "right_lower"],
+        format_func=lambda v: {"left_lower": "왼쪽 하단", "center_lower": "가운데 하단", "right_lower": "오른쪽 하단"}[v],
+        index=2,
+        disabled=(cup_position_mode != "manual"),
+    )
+    table_height = st.slider("탁자 높이 위치", min_value=0.76, max_value=0.94, value=0.91, step=0.01, help="값이 클수록 화면 아래쪽에 탁자가 배치됩니다.")
     speed_scale = st.slider("물방울/공기방울/물컵 속도 보정", min_value=0.00, max_value=6.00, value=1.00, step=0.25, help="0은 정지, 1은 표준 속도, 6은 빠른 이동입니다. v12에서는 속도 차이가 확실히 보이도록 비선형으로 적용됩니다.")
     st.divider()
     robustness = st.slider("손 떨림 보정/움직임 안정화", min_value=0.0, max_value=1.0, value=0.55, step=0.05)
@@ -186,7 +209,7 @@ st.markdown(
     **사용 순서**  
     1. 앱 안에서 **카메라 켜기**를 누르고 카메라 권한을 허용합니다.  
     2. 스마트폰/태블릿에서는 먼저 **소리 활성화/테스트**를 직접 누릅니다.  
-    3. 손이 화면 중앙에 보이게 하고 **손 편 상태 보정**과 **쥔/집은 상태 보정**을 시행합니다.  
+    3. 손이 화면 중앙에 보이게 하고 **손가락 동작 보정**을 시행합니다. 보정 과정에서 손가락을 편 상태와 쥔 상태를 차례대로 인식합니다.  
     4. 보정이 완료되면 **훈련 시작**을 눌러 선택한 과제를 수행합니다.  
     """
 )
@@ -202,6 +225,10 @@ config = {
     "stepTimeoutMs": int(step_timeout_sec * 1000),
     "gestureThreshold": float(gesture_threshold),
     "targetSizeScale": float(target_size_scale),
+    "mouthTargetScale": float(mouth_target_scale),
+    "cupPositionMode": cup_position_mode,
+    "cupPositionPreset": cup_position_preset,
+    "tableHeight": float(table_height),
     "speedScale": float(speed_scale),
     "robustness": float(robustness),
     "minHandConfidence": float(min_hand_conf),
@@ -210,6 +237,7 @@ config = {
     "trackMouth": bool(track_mouth),
     "soundMode": sound_mode,
     "audioAssets": load_audio_assets(),
+    "imageAssets": load_image_assets(),
 }
 
 HTML = r'''
@@ -243,6 +271,10 @@ HTML = r'''
   .statusBox { margin-top:10px; padding:10px; border-radius:14px; background:rgba(255,255,255,.06); min-height:88px; white-space:pre-line; color:#dceaff; font-size:14px; }
   .bar { height:13px; border-radius:999px; background:rgba(255,255,255,.12); overflow:hidden; margin-top:6px; }
   .fill { height:100%; width:0%; background:var(--green); transition:width .12s linear; }
+  .calMeterRow { display:flex; gap:12px; align-items:flex-end; margin-top:10px; }
+  .calMeter { width:34px; height:128px; border-radius:14px; background:rgba(255,255,255,.11); border:1px solid rgba(255,255,255,.18); position:relative; overflow:hidden; }
+  .calMeterFill { position:absolute; left:0; right:0; bottom:0; height:0%; background:linear-gradient(180deg, rgba(51,209,122,.95), rgba(87,166,255,.95)); transition:height .12s linear; }
+  .calMeterText { font-weight:900; font-size:18px; color:#fff; min-width:64px; }
   .small { color:var(--muted); font-size:12px; line-height:1.45; }
   .calBox { margin-top:10px; border-radius:14px; padding:10px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); }
   a.download { display:block; margin-top:8px; color:#9fd0ff; word-break:break-all; }
@@ -250,7 +282,7 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v17</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v22</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
@@ -275,7 +307,7 @@ HTML = r'''
       <div class="metric"><span>음성 상태</span><b id="voiceStatusText">대기</b></div>
       <div class="metric"><span>성공률</span><b id="accuracyText">-</b></div>
       <div class="metric"><span>평균 반응시간</span><b id="rtText">-</b></div>
-      <div class="calBox"><b>환자별 보정 상태</b><div class="small">손 편 상태와 쥔/집은 상태를 보정하면 마비 손의 변형과 제한된 움직임을 더 잘 반영합니다.</div><div class="small" id="calStatus">기본값 사용 중</div><div class="bar"><div class="fill" id="calFill"></div></div></div>
+      <div class="calBox"><b>환자별 보정 상태</b><div class="small">손가락 동작 보정은 음성 안내가 끝난 뒤 ‘이제 시작하세요’ 안내 후에만 측정됩니다.</div><div class="small" id="calStatus">기본값 사용 중</div><div class="calMeterRow"><div class="calMeter"><div class="calMeterFill" id="calMeterFill"></div></div><div><div class="calMeterText" id="calPercentText">0%</div><div class="small">측정 진행률</div></div></div><div class="bar"><div class="fill" id="calFill"></div></div></div>
       <div class="statusBox" id="logBox">앱 준비 중입니다.</div><div id="downloadArea"></div>
     </div>
   </div>
@@ -348,11 +380,24 @@ window.addEventListener('unhandledrejection', (event) => {
 
 const CONFIG = __CONFIG_JSON__;
 const AUDIO_ASSETS = CONFIG.audioAssets || {};
+const IMAGE_ASSETS = CONFIG.imageAssets || {};
+const IMG_CACHE = {};
+function getSprite(name){
+  const src = IMAGE_ASSETS[name];
+  if(!src) return null;
+  if(!IMG_CACHE[name]){ const im = new Image(); im.src = src; IMG_CACHE[name]=im; }
+  return IMG_CACHE[name];
+}
+function drawSprite(name,x,y,w,h,alpha=1){
+  const im=getSprite(name);
+  if(!im || !im.complete || !im.naturalWidth) return false;
+  ctx.save(); ctx.globalAlpha=alpha; ctx.drawImage(im,x-w/2,y-h/2,w,h); ctx.restore(); return true;
+}
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('outputCanvas');
 const ctx = canvas.getContext('2d');
 const ui = {
-  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), downloadArea: document.getElementById('downloadArea')
+  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), calMeterFill: document.getElementById('calMeterFill'), calPercent: document.getElementById('calPercentText'), downloadArea: document.getElementById('downloadArea')
 };
 const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.getElementById('btnSound'), fingerCal:document.getElementById('btnFingerCal'), train:document.getElementById('btnTrainStart'), abort:document.getElementById('btnAbort'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
 
@@ -363,9 +408,9 @@ const messages = {
   hand_not_found:'손이 보이지 않습니다. 손 전체가 화면에 들어오도록 조정하세요.',
   wrong_hand:'선택한 손이 아닙니다. 훈련 손을 다시 확인하세요.',
   low_quality:'손 인식이 불안정합니다. 조명을 밝게 하고 손 가림을 줄여 주세요.',
-  finger_cal_open:'손가락 동작 보정을 시작합니다. 먼저 가능한 범위에서 손가락을 최대한 펴고 3초 동안 그대로 유지하세요. 3초 평균값을 손 편 기준으로 저장합니다.',
-  finger_cal_close:'폄 동작이 인식되었습니다. 이번에는 가능한 범위에서 손가락을 최대한 구부려 손을 쥐고 3초 동안 그대로 유지하세요. 3초 평균값을 쥔 기준으로 저장합니다.',
-  finger_cal_done:'굽힘 동작이 인식되었습니다. 손가락 동작 보정이 완료되었습니다. 이제 훈련 시작 버튼을 눌러 물방울 훈련을 시작하세요.',
+  finger_cal_open:'손가락 동작 보정을 시작합니다. 먼저 손가락을 최대한 펴는 단계입니다. 설명이 끝난 뒤 이제 시작하세요라는 안내가 나오면, 그때부터 손가락을 최대한 편 상태로 유지해 주세요.',
+  finger_cal_close:'이번에는 손가락을 최대한 구부려 손을 쥐는 단계입니다. 설명이 끝난 뒤 이제 시작하세요라는 안내가 나오면, 그때부터 손가락을 최대한 구부린 상태로 유지해 주세요.',
+  finger_cal_done:'굽힘 동작이 인식되었습니다. 손가락 동작 보정이 완료되었습니다. 손 인식 표시선을 잠시 숨깁니다. 이제 훈련 시작 버튼을 눌러 물방울 훈련을 시작하세요.',
   cal_done:'보정이 완료되었습니다.',
   seek_target:'목표 위치로 손을 가져가세요.',
   now_gesture: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞대어 집으세요.' : (CONFIG.exercise.gesture==='open' ? '손을 충분히 펴세요.' : '손을 쥐세요.'),
@@ -374,8 +419,8 @@ const messages = {
   complete:'모든 훈련이 끝났습니다. 결과를 확인하세요.',
   cup_reach:'물컵으로 손을 가져가세요.',
   cup_grasp:'물컵을 잡으세요. 손을 쥔 상태를 유지하세요.',
-  cup_to_mouth:'좋습니다. 물컵을 실제 입 위치까지 천천히 옮기세요.',
-  cup_drink_hold:'입 위치에 도착했습니다. 그 위치에서 잠시 멈추세요.',
+  cup_to_mouth:'좋습니다. 물이 담긴 컵을 실제 입 위치까지 천천히 옮기세요.',
+  cup_drink_hold:'입 위치에 도착했습니다. 그 위치에서 잠시 멈추세요. 물을 마신 뒤 빈 컵을 다시 탁자 위치로 옮기게 됩니다.',
   mouth_not_found:'입 위치가 보이지 않습니다. 얼굴과 입이 화면에 보이도록 조정하세요.',
   air_bubble_seek:'얼굴 아래에 퍼져 있는 물방울 중 하나로 손을 천천히 가져가세요.',
   air_bubble_grasp:'물방울 안에서 손을 쥐세요. 손을 쥔 상태를 잠시 유지하면 물방울이 터집니다.',
@@ -394,12 +439,13 @@ let state='idle', score=0, attempts=0, successes=0, failureCount=0, reactionTime
 let target=null, stage='none', holdStart=null, overlapStart=null, reactionStart=null, lastStatusVoice=0;
 let targetSerial=0, lastStepId='', stepStartedAt=0, lastFailureAt=0;
 let bubbleOpenReady=false, bubbleOpenStart=0, bubbleCandidateId=null;
-let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0, calVoiceMilestone=-1, combinedCalActive=false, calDurationMs=3000;
+let openMetrics=null, closeMetrics=null, calMode=null, calSamples=[], calStart=0, calVoiceMilestone=-1, combinedCalActive=false, calDurationMs=3000, calStepId=0, calWaitingForStart=false;
+let hideHandLandmarksUntil=0;
 let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundAt=0, neutralTilt=null;
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v17 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v22 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -416,6 +462,7 @@ function log(msg){ ui.log.textContent=msg; }
 function updateVoiceStatus(text){ if(ui.voice) ui.voice.textContent=text; }
 function stopAllSpeech(status='음성 중단'){
   speechGeneration++;
+  try{ calStepId++; }catch(e){}
   speechQueue=[];
   speechActive=false;
   lastSpeakKey='';
@@ -427,6 +474,8 @@ function stopAllSpeech(status='음성 중단'){
 function resetSessionForNewAction(status='새 작업'){
   stopAllSpeech(status);
   trainingRunId++;
+  calStepId++;
+  calWaitingForStart=false;
 }
 function appIntroText(){ return messages.app_intro; }
 function announceAppIntro(force=false){ if(!force && !soundUnlocked) return; speakText('app_intro', appIntroText(), true); }
@@ -531,6 +580,27 @@ function speakText(key, text, force=false){
   }
   playMessage(key,text);
 }
+function estimateSpeechDurationMs(text){
+  const len=String(text||'').replace(/\s+/g,'').length;
+  return clamp(1800 + len*85, 2600, 9000);
+}
+function speakTextWithCallback(key, text, force=false, callback=null){
+  speakText(key, text, force);
+  const myGen=speechGeneration;
+  const delay=estimateSpeechDurationMs(text);
+  setTimeout(()=>{
+    if(myGen!==speechGeneration) return;
+    if(typeof callback==='function') callback();
+  }, delay);
+}
+function setCalProgress(pct){
+  const p=clamp(pct,0,1);
+  if(ui.calFill) ui.calFill.style.width=`${Math.round(p*100)}%`;
+  if(ui.calMeterFill) ui.calMeterFill.style.height=`${Math.round(p*100)}%`;
+  if(ui.calPercent) ui.calPercent.textContent=`${Math.round(p*100)}%`;
+}
+function resetCalProgress(){ setCalProgress(0); }
+function playCalibrationBeepDone(){ beep(740,.08,.08); setTimeout(()=>beep(980,.10,.08),120); }
 function playMessage(key,text){
   if(CONFIG.soundMode==='silent') return;
   if(!soundUnlocked){ toneFor(key); return; }
@@ -710,7 +780,7 @@ function taskIntroText(){
 function taskStartText(){
   const rep=Math.min(score+1, CONFIG.targetCount);
   const t=CONFIG.exercise.taskType;
-  if(t==='cup_drink') return `${rep}회차입니다. 먼저 손을 물컵으로 가져가세요. 물컵을 잡은 뒤, 실제 입 위치로 옮기고 잠시 멈추세요.`;
+  if(t==='cup_drink') return `${rep}회차입니다. 먼저 탁자 위 물컵으로 손을 가져가세요. 컵을 잡은 뒤 실제 입 위치까지 옮기고 잠시 멈춥니다. 물이 사라지면 빈 컵을 다시 원래 탁자 위치에 놓으세요.`;
   if(t==='hand_bubbles') return `남은 물방울 중 하나로 손을 천천히 이동하세요. 물방울 안에 들어가면 손가락을 굽혀 쥐고, 잠시 유지합니다.`;
   return `${rep}회차입니다. 손을 ${CONFIG.exercise.targetName} 위치로 가져간 뒤, ${gestureActionText()}. 끝동작은 잠시 유지합니다.`;
 }
@@ -732,17 +802,47 @@ function calibrationRequiredNotice(){
   return '현재는 자동 손동작 기준을 사용합니다. 환자별 손 상태를 더 잘 반영하려면 손가락 동작 보정을 사용할 수 있습니다.';
 }
 
+function calibrationScheduleGuard(id){ return id===calStepId && combinedCalActive && running && cameraOnlyReady; }
 function startFingerCalibration(){
   resetSessionForNewAction('손가락 동작 보정');
-  if(!running){
-    setInstruction('먼저 카메라를 켜세요','손 보정은 손 landmark가 인식된 뒤 시행할 수 있습니다.','warn');
+  if(!running || !cameraOnlyReady){
+    setInstruction('카메라를 먼저 켜세요','① 카메라만 켜기 버튼을 누른 뒤 손가락 동작 보정을 진행합니다.','warn');
     speakText('cal_need_camera', '먼저 카메라만 켜기 버튼을 누른 뒤 손가락 동작 보정을 진행하세요.', true);
     return;
   }
-  trainingActive=false; paused=false; target=null; particles=[]; stage='calibration'; holdStart=null; resetBubbleOpenGate();
-  combinedCalActive=true; calMode='open'; calSamples=[]; calStart=now(); calVoiceMilestone=-1; state='cal_open'; ui.calFill.style.width='0%'; updateUI();
-  speakText('finger_cal_open_start', messages.finger_cal_open, true);
-  setInstruction('손가락 동작 보정: 1단계 손 펴기','가능한 범위에서 손가락을 최대한 펴고 3초 동안 유지하세요. 3초 평균을 손 편 기준으로 저장합니다.','warn');
+  trainingActive=false; paused=false; target=null; particles=[]; stage='calibration_instruction'; holdStart=null; resetBubbleOpenGate();
+  combinedCalActive=true; calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_open_instruction'; resetCalProgress(); updateUI();
+  const id=calStepId;
+  const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락 펴기 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 펼 준비를 하세요. 화면에 이제 시작하세요 문구와 음성이 나온 뒤에 진행 바가 올라가면, 그때부터 3초 동안 손가락을 편 상태로 유지합니다.';
+  setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝나고 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
+  speakText('finger_cal_open_explain_'+id, explain, true);
+  setTimeout(()=>{
+    if(!calibrationScheduleGuard(id)) return;
+    setInstruction('손가락 동작 보정: 손 펴기 준비','곧 측정이 시작됩니다. 진행 바가 올라갈 때부터 손가락을 최대한 펴고 유지하세요.','warn');
+    speakText('finger_cal_open_now_'+id, '이제 시작하세요. 손가락을 최대한 편 상태로 유지하세요.', true);
+    setTimeout(()=>{ if(calibrationScheduleGuard(id)) beginCalibrationMeasurement('open'); }, 2300);
+  }, 9000);
+}
+function beginCalibrationMeasurement(mode){
+  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; calWaitingForStart=false; resetCalProgress();
+  state=mode==='open'?'cal_open_count':'cal_close_count';
+  stage='calibration_measure';
+  const title = mode==='open' ? '손 펴기 측정 중' : '손 쥐기 측정 중';
+  const sub = mode==='open' ? '지금부터 측정 중입니다. 손가락을 최대한 편 상태로 유지하세요. 진행 바 100%에서 인식됩니다.' : '지금부터 측정 중입니다. 손가락을 최대한 구부려 쥔 상태로 유지하세요. 진행 바 100%에서 인식됩니다.';
+  setInstruction(`손가락 동작 보정: ${title}`, sub, 'warn');
+}
+function beginCloseCalibrationInstruction(){
+  calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_close_instruction'; stage='calibration_instruction'; resetCalProgress();
+  const id=calStepId;
+  const explain = '이번에는 손가락 굽힘 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 구부릴 준비를 하세요. 화면에 이제 시작하세요 문구와 음성이 나온 뒤에 진행 바가 올라가면, 그때부터 3초 동안 손가락을 구부린 상태로 유지합니다.';
+  setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝나고 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
+  speakText('finger_cal_close_explain_'+id, explain, true);
+  setTimeout(()=>{
+    if(!calibrationScheduleGuard(id)) return;
+    setInstruction('손가락 동작 보정: 손 쥐기 준비','곧 측정이 시작됩니다. 진행 바가 올라갈 때부터 손가락을 최대한 구부려 유지하세요.','warn');
+    speakText('finger_cal_close_now_'+id, '이제 시작하세요. 손가락을 최대한 구부린 상태로 유지하세요.', true);
+    setTimeout(()=>{ if(calibrationScheduleGuard(id)) beginCalibrationMeasurement('close'); }, 2300);
+  }, 8300);
 }
 
 function chooseHand(result){
@@ -810,13 +910,34 @@ function updateGestureDisplay(m){
 function canvasPoint(p){ return {x:(CONFIG.mirrorView ? 1-p.x : p.x)*canvas.width, y:p.y*canvas.height}; }
 function cursorPx(m){ const p=canvasPoint(m.cursor); if(!smoothedCursor) smoothedCursor=p; smoothedCursor={x:lerp(smoothedCursor.x,p.x,.30), y:lerp(smoothedCursor.y,p.y,.30)}; return smoothedCursor; }
 function targetRadius(){ return CONFIG.levelConfig.targetRadius*CONFIG.targetSizeScale; }
+function mouthRadius(base){ return Math.max(18, base*(Number(CONFIG.mouthTargetScale)||1)); }
+function cupHomePosition(r){
+  const mode = CONFIG.cupPositionMode || 'auto_by_hand';
+  const preset = CONFIG.cupPositionPreset || 'right_lower';
+  const tableY = canvas.height * Math.max(0.88, Number(CONFIG.tableHeight)||0.90);
+  const yy = clamp(tableY - r*0.02, canvas.height*0.76, canvas.height*0.91);
+  let xRatio = 0.72;
+  if(mode==='manual'){
+    if(preset==='left_lower') xRatio = 0.24;
+    else if(preset==='center_lower') xRatio = 0.50;
+    else xRatio = 0.76;
+  }else{
+    const hand = CONFIG.affectedHand || 'Any';
+    const isLeft = hand==='Left';
+    const isRight = hand==='Right';
+    const fallbackLeft = CONFIG.mirrorView ? 0.27 : 0.24;
+    const fallbackRight = CONFIG.mirrorView ? 0.73 : 0.76;
+    xRatio = isLeft ? fallbackLeft : (isRight ? fallbackRight : 0.72);
+  }
+  return {x:canvas.width*xRatio, y:yy, r:r*0.72};
+}
 function randomTarget(r){ const margin=r+28; return {x:margin+Math.random()*Math.max(20,canvas.width-margin*2), y:margin+Math.random()*Math.max(20,canvas.height-margin*2), r, vx:(Math.random()*2-1)*CONFIG.levelConfig.speed*CONFIG.speedScale, vy:(Math.random()*2-1)*CONFIG.levelConfig.speed*CONFIG.speedScale}; }
-function mouthFallback(r){ return {x:canvas.width*.74,y:canvas.height*.25,r:r*.78,actual:false}; }
+function mouthFallback(r){ const rr = mouthRadius(r*.78); return {x:canvas.width*.74,y:canvas.height*.25,r:rr,actual:false}; }
 function spawnTaskTarget(){
   const r=targetRadius(); const type=CONFIG.exercise.taskType;
   holdStart=null; overlapStart=null; reactionStart=now(); successLock=false; targetSerial++; lastStepId=''; stepStartedAt=now();
   if(type==='bubble'){ target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
-  else if(type==='cup_drink'){ target={cup:{x:canvas.width*.25,y:canvas.height*.64,r:r*.82,attached:false}, mouth:mouthFallback(r)}; stage='cup_reach'; state='cup_reach'; }
+  else if(type==='cup_drink'){ const home=cupHomePosition(r); target={cup:{x:home.x,y:home.y,r:home.r,attached:false,filled:true,homeX:home.x,homeY:home.y,returnReady:false}, mouth:mouthFallback(r), table:{y:canvas.height*0.88}}; stage='cup_reach'; state='cup_reach'; }
   else if(type==='hand_bubbles'){ resetBubbleOpenGate(); target={kind:'air_bubbles', bubbles:[], initialized:false, lastPop:null, activeId:null, anchor:{x:canvas.width*.50,y:canvas.height*.34}, r:r*.52}; stage='air_seek'; state='air_bubble_seek'; }
   else { target=randomTarget(r); target.kind='bubble'; stage='seek'; state='seek_target'; }
 }
@@ -833,12 +954,23 @@ function resetCurrentAttempt(){
     spawnTaskTarget();
   }
 }
+function taskProgressItem(){
+  if(CONFIG.exercise.taskType==='hand_bubbles') return '공기방울';
+  if(CONFIG.exercise.taskType==='cup_drink') return '과제';
+  return CONFIG.exerciseKey==='bubble_pinch' ? '작은 물방울' : '물방울';
+}
+function remainProgressText(remain){
+  return CONFIG.exercise.taskType==='cup_drink' ? `남은 반복은 ${remain}회입니다.` : `남은 ${taskProgressItem()}은 ${remain}개입니다.`;
+}
+function successProgressText(count){
+  return CONFIG.exercise.taskType==='cup_drink' ? `현재까지 ${count}회 성공했습니다.` : `${taskProgressItem()} ${count}개를 완료했습니다.`;
+}
 function onFailure(reason='잘못 수행되었습니다.'){
   if(state==='complete' || now()-lastFailureAt<4500) return;
   lastFailureAt=now(); attempts++; failureCount++;
   const remain = CONFIG.exercise.taskType==='hand_bubbles' ? remainingBubbles() : Math.max(0, CONFIG.targetCount-score);
   setInstruction('다시 시도하세요', `${reason} 성공으로 기록하지 않습니다. 남은 목표를 다시 수행하세요.`, 'bad');
-  speakText('fail_'+targetSerial, `${reason} 이번 시도는 성공으로 기록하지 않습니다. 준비 자세로 돌아온 뒤 다시 수행하세요. 남은 목표는 ${remain}개입니다.`, true);
+  speakText('fail_'+targetSerial, `${reason} 이번 시도는 성공으로 기록하지 않습니다. 준비 자세로 돌아온 뒤 다시 수행하세요. ${remainProgressText(remain)}`, true);
   resetCurrentAttempt();
   updateUI();
 }
@@ -857,13 +989,13 @@ function onSuccess(){
   score++; successes++; attempts++; const rtSec = reactionStart ? (now()-reactionStart)/1000 : 0; if(reactionStart) reactionTimes.push(rtSec); successTimes.push(rtSec); addParticles(); updateUI();
   const remain = CONFIG.targetCount - score;
   if(score>=CONFIG.targetCount || (CONFIG.exercise.taskType==='hand_bubbles' && remainingBubbles()<=0)){ completeGame(); return; }
-  setInstruction('정상적으로 성공했습니다', `물방울 ${score}개를 터뜨렸습니다. 남은 물방울은 ${remain}개입니다.`, 'ready');
-  speakText('rep_success_'+score, `정상적으로 성공했습니다. 물방울 ${score}개를 터뜨렸습니다. 남은 물방울은 ${remain}개입니다. 처음 자세에서 다음 물방울을 계속 터뜨리세요.`, true);
+  setInstruction('정상적으로 성공했습니다', `${successProgressText(score)} ${remainProgressText(remain)}`, 'ready');
+  speakText('rep_success_'+score, `정상적으로 성공했습니다. ${successProgressText(score)} ${remainProgressText(remain)} 처음 자세로 돌아와 다음 과제를 이어서 수행하세요.`, true);
   const thisRun=trainingRunId;
   setTimeout(()=>{ if(thisRun===trainingRunId && trainingActive && running&&!paused&&state!=='complete'){
     if(CONFIG.exercise.taskType==='hand_bubbles' && target && target.kind==='air_bubbles'){ holdStart=null; successLock=false; resetBubbleOpenGate(); stage='air_seek'; state='air_bubble_seek'; reactionStart=now(); target.activeId=null; }
     else{ spawnTaskTarget(); speakText('rep_start_'+targetSerial, taskStartText(), true); }
-  } }, 1200);
+  } }, 1500);
 }
 function addParticles(){ const pop=target?.lastPop || target; const px=(pop?.x||target?.x||target?.cup?.x||canvas.width/2), py=(pop?.y||target?.y||target?.cup?.y||canvas.height/2); for(let i=0;i<24;i++){ particles.push({x:px, y:py, vx:(Math.random()*2-1)*3.4, vy:(Math.random()*2-1)*3.4, life:32+Math.random()*24}); } }
 
@@ -1092,8 +1224,8 @@ function updateMouthTargetFromFace(faceResult){
         let mouthWidth=0;
         if(left&&right) mouthWidth=Math.hypot((left.x-right.x)*canvas.width,(left.y-right.y)*canvas.height);
         const px={x:(CONFIG.mirrorView?1-x:x)*canvas.width, y:y*canvas.height};
-        const baseR=targetRadius()*0.50;
-        const r=clamp(Math.max(baseR, mouthWidth*1.20), targetRadius()*0.42, targetRadius()*0.90);
+        const baseR=mouthRadius(targetRadius()*0.50);
+        const r=clamp(Math.max(baseR, mouthWidth*1.20*(Number(CONFIG.mouthTargetScale)||1)), mouthRadius(targetRadius()*0.42), mouthRadius(targetRadius()*0.90));
         detected={x:px.x,y:px.y,r,actual:true};
       }
     }
@@ -1114,17 +1246,33 @@ function mouthReady(){
 }
 function processCupDrink(m){
   const c=cursorPx(m); const cup=target.cup, mouth=target.mouth; const g=smoothedGesture>=CONFIG.gestureThreshold || CONFIG.level===1;
+  const home = {x:cup.homeX, y:cup.homeY, r:cup.r*1.10};
   if(stage==='cup_reach'){
-    if(!insidePoint(c,cup,1.08)){ resetHold(); speakOnce('cup_reach'); setInstruction('1단계: 물컵으로 손을 가져가세요','손바닥 중심이 물컵 안에 들어가도록 천천히 이동합니다.','info'); return; }
-    if(!g){ resetHold(); speakOnce('cup_grasp'); setInstruction('2단계: 물컵을 잡으세요','손을 쥔 상태를 유지하면 컵이 손에 붙습니다.','action'); return; }
-    beginHold(); setInstruction('물컵을 잡은 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn'); if(holdProgress()>=1){ cup.attached=true; stage='cup_to_mouth'; resetHold(); speakText('stage_cup_to_mouth_'+targetSerial, '좋습니다. 이제 물컵을 실제 입 위치까지 천천히 옮기세요.', true); }
+    cup.attached=false; cup.x=cup.homeX; cup.y=cup.homeY;
+    if(!insidePoint(c,home,1.02)){ resetHold(); speakOnce('cup_reach'); setInstruction('1단계: 탁자 위 물컵으로 손을 가져가세요','화면 하단 탁자 위 물컵 안으로 손바닥 중심을 천천히 이동합니다.','info'); return; }
+    if(!g){ resetHold(); speakOnce('cup_grasp'); setInstruction('2단계: 물컵을 잡으세요','물컵 안에서 손을 쥐고 유지하면 컵을 잡은 것으로 인식합니다.','action'); return; }
+    beginHold(); setInstruction('물컵을 잡은 상태를 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
+    if(holdProgress()>=1){ cup.attached=true; stage='cup_to_mouth'; resetHold(); speakText('stage_cup_to_mouth_'+targetSerial, '좋습니다. 이제 물이 담긴 컵을 실제 입 위치까지 천천히 옮기세요. 입 위치에 도착하면 잠시 멈춥니다.', true); }
     return;
   }
   if(stage==='cup_to_mouth'){
-    cup.x=c.x; cup.y=c.y;
+    cup.attached=true; cup.x=c.x; cup.y=c.y;
     if(!mouthReady()){ resetHold(); setInstruction('입 위치가 보이도록 얼굴을 보여 주세요','얼굴과 입 주변이 화면에 보이면 실제 입 위치 목표가 표시됩니다.','warn'); return; }
-    if(!insidePoint(c,mouth,.95)){ resetHold(); setInstruction('물컵을 실제 입 위치로 옮기세요', mouth.actual?'파란 원은 현재 화면에서 인식된 입 위치입니다.':'파란 원은 입 위치 추정 목표입니다.', 'drink'); return; }
-    beginHold(); speakOnce('cup_drink_hold'); setInstruction('3단계: 입 위치에서 잠시 멈추세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn'); if(holdProgress()>=1) onSuccess();
+    if(!insidePoint(c,mouth,.95)){ resetHold(); setInstruction('3단계: 물컵을 실제 입 위치로 옮기세요', mouth.actual?'파란 원은 현재 화면에서 인식된 실제 입 위치입니다.':'파란 원은 입 위치 추정 목표입니다.', 'drink'); return; }
+    beginHold(); speakOnce('cup_drink_hold'); setInstruction('입 위치에서 잠시 멈추세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
+    if(holdProgress()>=1){
+      cup.filled=false; cup.returnReady=true; stage='cup_return'; resetHold();
+      speakText('stage_cup_return_'+targetSerial, '좋습니다. 물을 마셨습니다. 이제 빈 컵을 원래 탁자 위 위치로 천천히 가져가세요. 원래 위치에 놓고 잠시 유지하면 성공입니다.', true);
+    }
+    return;
+  }
+  if(stage==='cup_return'){
+    cup.attached=true; cup.x=c.x; cup.y=c.y;
+    if(!insidePoint(c,home,1.02)){ resetHold(); setInstruction('4단계: 빈 컵을 원래 위치로 가져가세요','하단 탁자 위 밝은 받침 위치에 컵을 다시 놓아 주세요.','drink'); return; }
+    beginHold(); setInstruction('원래 위치에 컵을 놓고 잠시 유지하세요',`${Math.round(clamp(holdProgress(),0,1)*100)}%`, 'warn');
+    if(holdProgress()>=1){
+      cup.attached=false; cup.x=cup.homeX; cup.y=cup.homeY; resetHold(); onSuccess();
+    }
   }
 }
 function angleDelta(a,b){ let d=a-b; while(d>180)d-=360; while(d<-180)d+=360; return d; }
@@ -1161,12 +1309,18 @@ function processGame(m,handed,handScore){
   if(state==='complete') return;
   ui.hand.textContent=`${handed} (${Math.round(100*handScore)}%)`;
   updateGestureDisplay(m);
-  if(calMode){ processCalibration(m); return; }
+  if(combinedCalActive){
+    if(calMode){ processCalibration(m); }
+    else if(calWaitingForStart){
+      setInstruction(state==='cal_close_instruction'?'손 쥐기 측정 준비':'손 펴기 측정 준비','아직 측정하지 않습니다. 음성 안내와 “이제 시작하세요” 이후에 진행 바가 올라갑니다.','warn');
+    }
+    return;
+  }
   if(!trainingActive){
     target=null; particles=[];
     if(!calMode && state!=='camera_only_ready'){
       state='camera_only_ready'; stage='camera_only_ready';
-      setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ⑤ 훈련 시작 버튼을 눌러야 물방울이 나타납니다.','ready');
+      setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ④ 훈련 시작 버튼을 눌러야 물방울 또는 물컵 과제가 나타납니다.','ready');
     }
     return;
   }
@@ -1176,34 +1330,41 @@ function processGame(m,handed,handScore){
   checkStepTimeout();
 }
 function processCalibration(m){
+  if(calMode!=='open' && calMode!=='close') return;
   const elapsed=now()-calStart;
+  if(elapsed < 0){
+    setCalProgress(0);
+    const modeName = calMode==='open' ? '손 펴기' : '손 쥐기';
+    setInstruction(`손가락 동작 보정: ${modeName} 측정 준비`, '곧 측정이 시작됩니다. 화면의 진행 바가 올라갈 때부터 손 모양을 유지하세요.', 'warn');
+    return;
+  }
   const progress=clamp(elapsed/calDurationMs,0,1);
-  ui.calFill.style.width=`${Math.round(progress*100)}%`;
+  setCalProgress(progress);
   calSamples.push({pinch:m.pinch,fingertipAvg:m.fingertipAvg,angle:m.angle});
   const remain=Math.max(0, calDurationMs/1000-elapsed/1000);
   const modeName = calMode==='open' ? '손 펴기' : '손 쥐기';
-  setInstruction(`손가락 동작 보정: ${modeName}`, `남은 시간 ${remain.toFixed(1)}초 · 현재 손가락 거리값 ${m.fingertipAvg.toFixed(2)} · 3초 평균을 저장합니다.`, 'warn');
-  const milestone=Math.floor(elapsed/900);
-  if(milestone!==calVoiceMilestone && elapsed<calDurationMs-250){
-    calVoiceMilestone=milestone;
-    if(milestone===1) speakText('cal_keep_'+calMode, '좋습니다. 손 모양을 그대로 유지하세요.', false);
-    if(milestone===2) speakText('cal_almost_'+calMode, '거의 끝났습니다. 조금만 더 유지하세요.', false);
-  }
+  setInstruction(`손가락 동작 보정: ${modeName} 측정 중`, `진행률 ${Math.round(progress*100)}% · 남은 시간 ${remain.toFixed(1)}초 · 현재 손가락 거리값 ${m.fingertipAvg.toFixed(2)}`, 'warn');
   if(progress<1) return;
+  setCalProgress(1);
   const avg={pinch:mean(calSamples.map(s=>s.pinch)),fingertipAvg:mean(calSamples.map(s=>s.fingertipAvg)),angle:mean(calSamples.map(s=>s.angle))};
-  if(calMode==='open'){
-    openMetrics=avg;
-    calMode='close'; calSamples=[]; calStart=now(); calVoiceMilestone=-1; ui.calFill.style.width='0%'; state='cal_close'; updateCalibrationStatus();
-    speakText('finger_cal_close_start', messages.finger_cal_close, true);
-    setInstruction('손가락 동작 보정: 2단계 손 쥐기','이번에는 가능한 범위에서 손가락을 최대한 구부려 손을 쥐고 3초 동안 유지하세요. 3초 평균을 쥔 기준으로 저장합니다.','warn');
+  const finishedMode=calMode;
+  calMode=null; calSamples=[]; calVoiceMilestone=-1; calWaitingForStart=false;
+  if(finishedMode==='open'){
+    openMetrics=avg; updateCalibrationStatus(); playCalibrationBeepDone();
+    setInstruction('손 펴기 100% 인식되었습니다', `손 편 기준 ${openMetrics.fingertipAvg.toFixed(2)} 저장 완료. 다음은 손 쥐기 보정입니다.`, 'ready');
+    const openDoneId = calStepId;
+    speakText('finger_cal_open_done_'+openDoneId, '100퍼센트. 손가락 펴기 동작이 인식되었습니다. 다음은 손가락 굽힘 동작입니다.', true);
+    setTimeout(()=>{ if(combinedCalActive && openDoneId===calStepId) beginCloseCalibrationInstruction(); }, 4200);
     return;
   }
   closeMetrics=avg;
-  combinedCalActive=false; calMode=null; calSamples=[]; calVoiceMilestone=-1; ui.calFill.style.width='100%'; updateCalibrationStatus();
+  combinedCalActive=false; calMode=null; calSamples=[]; calVoiceMilestone=-1; calWaitingForStart=false; setCalProgress(1); updateCalibrationStatus();
   const r=calibratedFingerRange();
   const warnText = (!r.calibrated || r.range<0.10) ? ' 손 펴기와 손 쥐기 차이가 작게 측정되었습니다. 그래도 자동 보정 보완 기준으로 훈련할 수 있습니다. 필요하면 다시 보정하세요.' : '';
-  speakText('finger_cal_done', `${messages.finger_cal_done} 손 편 기준은 ${openMetrics.fingertipAvg.toFixed(2)}, 쥔 기준은 ${closeMetrics.fingertipAvg.toFixed(2)}입니다.${warnText}`, true);
+  hideHandLandmarksUntil=now()+3200;
+  playCalibrationBeepDone();
   setInstruction('손가락 동작 보정 완료', `손 편 기준 ${openMetrics.fingertipAvg.toFixed(2)} / 쥔 기준 ${closeMetrics.fingertipAvg.toFixed(2)}. 이제 ④ 훈련 시작을 누르세요.`, 'ready');
+  speakText('finger_cal_done_'+calStepId, `100퍼센트. 손가락 굽힘 동작이 인식되었습니다. 손가락 동작 보정이 완료되었습니다. 이제 훈련 시작 버튼을 눌러 훈련을 시작하세요.${warnText}`, true);
   state='camera_only_ready'; stage='camera_only_ready'; trainingActive=false; target=null; particles=[];
 }
 function completeGame(){
@@ -1213,8 +1374,10 @@ function completeGame(){
   const totalSec=(now()-gameStartTime)/1000;
   const meanRt=mean(reactionTimes);
   const failCount=failureCount;
-  const completeVoice = `축하합니다. 목표 과제를 성공적으로 달성했습니다. 총 ${CONFIG.targetCount}개의 물방울 중 ${successes}개를 터뜨렸습니다. 실패 횟수는 ${failCount}회이고, 평균 성공 시간은 ${meanRt.toFixed(2)}초입니다. 훈련을 종료합니다. 화면의 결과 저장 버튼을 눌러 기록을 저장할 수 있습니다.`;
-  setInstruction('훈련을 성공적으로 달성했습니다',`성공 ${successes}회 · 실패 ${failCount}회 · 평균 성공시간 ${meanRt.toFixed(2)}초`, 'ready');
+  const unitText = CONFIG.exercise.taskType==='cup_drink' ? '회' : '개';
+  const itemText = taskProgressItem();
+  const completeVoice = `축하합니다. 목표 과제를 성공적으로 달성했습니다. 총 ${CONFIG.targetCount}${unitText}의 ${itemText} 과제 중 ${successes}${unitText}를 성공했습니다. 실패 횟수는 ${failCount}회이고, 평균 성공 시간은 ${meanRt.toFixed(2)}초입니다. 훈련을 종료합니다. 화면의 결과 저장 버튼을 눌러 기록을 저장할 수 있습니다.`;
+  setInstruction('훈련을 성공적으로 달성했습니다',`성공 ${successes}${CONFIG.exercise.taskType==='cup_drink'?'회':'개'} · 실패 ${failCount}회 · 평균 성공시간 ${meanRt.toFixed(2)}초`, 'ready');
   speakText('complete_summary_'+targetSerial, completeVoice, true);
   const result={date:new Date().toISOString(), exercise:CONFIG.exercise.label, hand:CONFIG.affectedHand, level:CONFIG.level, targetCount:CONFIG.targetCount, successCount:successes, failureCount:failCount, totalSeconds:Number(totalSec.toFixed(1)), meanReactionTimeSeconds:Number(meanRt.toFixed(2)), successTimes: successTimes.map(v=>Number(v.toFixed(2))), holdMs:CONFIG.holdMs, gestureThreshold:CONFIG.gestureThreshold, note:'단일 웹캠 기반 교육/피드백용 손 기능 가상훈련 결과입니다. 임상 진단용으로 사용하려면 별도 검증이 필요합니다.'};
   const text=`손 기능 재활 가상훈련 결과
@@ -1245,13 +1408,18 @@ function drawScene(handData,m){
   ctx.save(); if(CONFIG.mirrorView){ctx.translate(canvas.width,0);ctx.scale(-1,1);} ctx.drawImage(video,0,0,canvas.width,canvas.height); ctx.restore();
   ctx.fillStyle='rgba(0,0,0,.16)'; ctx.fillRect(0,0,canvas.width,canvas.height);
   drawGuide(); drawTargets(); drawParticles();
-  if(handData&&handData.landmarks){ const lm=handData.landmarks.map(p=>({...p,x:CONFIG.mirrorView?1-p.x:p.x})); drawHand(lm); if(m){ const c=cursorPx(m); ctx.fillStyle=smoothedGesture>=CONFIG.gestureThreshold?'#33d17a':'#ffd166'; ctx.beginPath(); ctx.arc(c.x,c.y,13,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.stroke(); } }
+  if(handData&&handData.landmarks && now()>hideHandLandmarksUntil){ const lm=handData.landmarks.map(p=>({...p,x:CONFIG.mirrorView?1-p.x:p.x})); drawHand(lm); if(m){ const c=cursorPx(m); ctx.fillStyle=smoothedGesture>=CONFIG.gestureThreshold?'#33d17a':'#ffd166'; ctx.beginPath(); ctx.arc(c.x,c.y,13,0,Math.PI*2); ctx.fill(); ctx.strokeStyle='#fff'; ctx.lineWidth=3; ctx.stroke(); } }
   if(state==='complete'){ ctx.fillStyle='rgba(0,0,0,.58)'; ctx.fillRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#33d17a'; ctx.font='bold 44px sans-serif'; ctx.textAlign='center'; ctx.fillText('훈련 완료',canvas.width/2,canvas.height/2-20); ctx.fillStyle='#fff'; ctx.font='24px sans-serif'; ctx.fillText(`성공 ${successes}/${CONFIG.targetCount} · 실패 ${failureCount} · 평균 ${mean(reactionTimes).toFixed(2)}초`,canvas.width/2,canvas.height/2+25); }
 }
 function drawGuide(){ ctx.strokeStyle='rgba(255,255,255,.33)'; ctx.lineWidth=2; ctx.setLineDash([8,8]); ctx.beginPath(); ctx.moveTo(canvas.width/2,0); ctx.lineTo(canvas.width/2,canvas.height); ctx.stroke(); ctx.beginPath(); ctx.moveTo(0,canvas.height/2); ctx.lineTo(canvas.width,canvas.height/2); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='rgba(87,166,255,.10)'; ctx.fillRect(canvas.width*.12,canvas.height*.10,canvas.width*.76,canvas.height*.80); }
 function drawBubble(o){
   if(!o)return;
   const x=o.x, y=o.y, r=o.r;
+  const sprite = CONFIG.exerciseKey==='bubble_pinch' ? 'round_bubble_photo' : 'waterdrop_photo';
+  const h = CONFIG.exerciseKey==='bubble_pinch' ? r*2.22 : r*2.75;
+  const w = CONFIG.exerciseKey==='bubble_pinch' ? r*2.22 : r*2.25;
+  if(drawSprite(sprite,x,y,w,h,1)) return;
+  // Fallback vector drawing if image sprite is not loaded yet.
   ctx.save();
   ctx.shadowColor='rgba(30,160,255,.45)'; ctx.shadowBlur=18;
   const grad=ctx.createRadialGradient(x-r*.28,y-r*.36,r*.06,x,y+r*.10,r*1.18);
@@ -1260,47 +1428,27 @@ function drawBubble(o){
   grad.addColorStop(.55,'rgba(70,183,255,.82)');
   grad.addColorStop(1,'rgba(0,93,205,.72)');
   ctx.fillStyle=grad;
-  // Real water-drop silhouette: round lower body with pointed top.
-  ctx.beginPath();
-  ctx.moveTo(x, y-r*1.25);
-  ctx.bezierCurveTo(x-r*.78, y-r*.36, x-r*.88, y+r*.20, x-r*.54, y+r*.62);
-  ctx.bezierCurveTo(x-r*.18, y+r*1.08, x+r*.18, y+r*1.08, x+r*.54, y+r*.62);
-  ctx.bezierCurveTo(x+r*.88, y+r*.20, x+r*.78, y-r*.36, x, y-r*1.25);
-  ctx.closePath();
-  ctx.fill();
-  ctx.shadowBlur=0;
-  ctx.strokeStyle='rgba(255,255,255,.86)'; ctx.lineWidth=Math.max(2,r*.045); ctx.stroke();
-  // Specular highlights make it read as a water droplet rather than a flat marker.
-  ctx.fillStyle='rgba(255,255,255,.90)';
-  ctx.beginPath(); ctx.ellipse(x-r*.24,y-r*.28,r*.14,r*.25,-.55,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,.55)';
-  ctx.beginPath(); ctx.arc(x+r*.18,y+r*.25,r*.10,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0; ctx.strokeStyle='rgba(255,255,255,.86)'; ctx.lineWidth=Math.max(2,r*.045); ctx.stroke();
   ctx.restore();
 }
 
 function drawAirBubble(o, active=false){
   if(!o || o.popped) return;
   const x=o.x,y=o.y,r=o.r;
+  const scale=active?2.36:2.20;
+  if(drawSprite('round_bubble_photo',x,y,r*scale,r*scale,1)){
+    if(active){ ctx.save(); ctx.strokeStyle='rgba(255,209,102,.98)'; ctx.lineWidth=5; ctx.beginPath(); ctx.arc(x,y,r*1.08,0,Math.PI*2); ctx.stroke(); ctx.restore(); }
+    return;
+  }
   ctx.save();
   const pulse = 1 + Math.sin(o.shimmer||0)*0.025;
   const rr = r*pulse;
   ctx.shadowColor='rgba(80,190,255,.28)'; ctx.shadowBlur=active?18:10;
   const grad=ctx.createRadialGradient(x-rr*.30,y-rr*.34,rr*.06,x,y,rr);
-  grad.addColorStop(0,'rgba(255,255,255,.98)');
-  grad.addColorStop(.18,'rgba(228,249,255,.88)');
-  grad.addColorStop(.55,'rgba(144,219,255,.40)');
-  grad.addColorStop(1,'rgba(92,180,255,.14)');
-  ctx.fillStyle=grad;
-  ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.fill();
-  ctx.shadowBlur=0;
-  ctx.strokeStyle=active?'rgba(255,209,102,.98)':'rgba(220,248,255,.95)'; ctx.lineWidth=active?5:3;
-  ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.stroke();
-  ctx.strokeStyle='rgba(255,255,255,.86)'; ctx.lineWidth=Math.max(2,rr*.04);
-  ctx.beginPath(); ctx.arc(x-rr*.18,y-rr*.18,rr*.38,Math.PI*1.05,Math.PI*1.63); ctx.stroke();
-  ctx.fillStyle='rgba(255,255,255,.84)';
-  ctx.beginPath(); ctx.ellipse(x-rr*.28,y-rr*.34,rr*.11,rr*.17,-.55,0,Math.PI*2); ctx.fill();
-  ctx.fillStyle='rgba(255,255,255,.46)';
-  ctx.beginPath(); ctx.arc(x+rr*.18,y+rr*.18,rr*.08,0,Math.PI*2); ctx.fill();
+  grad.addColorStop(0,'rgba(255,255,255,.98)'); grad.addColorStop(.18,'rgba(228,249,255,.88)'); grad.addColorStop(.55,'rgba(144,219,255,.40)'); grad.addColorStop(1,'rgba(92,180,255,.14)');
+  ctx.fillStyle=grad; ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.fill();
+  ctx.shadowBlur=0; ctx.strokeStyle=active?'rgba(255,209,102,.98)':'rgba(220,248,255,.95)'; ctx.lineWidth=active?5:3; ctx.beginPath(); ctx.arc(x,y,rr,0,Math.PI*2); ctx.stroke();
   ctx.restore();
 }
 
@@ -1321,45 +1469,79 @@ function roundedPoly(points, radius){
 function drawCup(o,filled=false,label='물컵'){
   if(!o)return;
   const x=o.x,y=o.y,r=o.r;
+  const spriteName = filled ? 'glass_cup_full' : 'glass_cup_empty';
+  if(drawSprite(spriteName,x,y,r*2.05,r*2.05,1)){
+    ctx.save(); ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,Math.round(r*.20))}px sans-serif`; ctx.textAlign='center'; ctx.fillText(label,x,y+r*1.08); ctx.restore();
+    return;
+  }
   ctx.save();
-  ctx.shadowColor='rgba(0,0,0,.28)'; ctx.shadowBlur=10; ctx.shadowOffsetY=4;
-  // Transparent tapered glass cup.
-  const topW=r*1.18, botW=r*.74, h=r*1.36;
-  const topY=y-r*.72, botY=y+r*.66;
+  ctx.shadowColor='rgba(0,0,0,.28)'; ctx.shadowBlur=13; ctx.shadowOffsetY=5;
+  // shadow / coaster
+  ctx.fillStyle='rgba(0,0,0,.22)';
+  ctx.beginPath(); ctx.ellipse(x,y+r*.84,r*.68,r*.18,0,0,Math.PI*2); ctx.fill();
+  ctx.fillStyle='rgba(215,176,96,.20)';
+  ctx.strokeStyle='rgba(242,208,120,.42)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.ellipse(x,y+r*.80,r*.78,r*.22,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+
+  const topW=r*1.22, botW=r*.78, h=r*1.42;
+  const topY=y-r*.76, botY=y+r*.66;
   const cupPath=[
     {x:x-topW/2,y:topY},{x:x+topW/2,y:topY},
     {x:x+botW/2,y:botY},{x:x-botW/2,y:botY}
   ];
   const glassGrad=ctx.createLinearGradient(x-topW/2,topY,x+topW/2,botY);
-  glassGrad.addColorStop(0,'rgba(255,255,255,.40)');
-  glassGrad.addColorStop(.35,'rgba(210,240,255,.18)');
-  glassGrad.addColorStop(.65,'rgba(130,210,255,.16)');
-  glassGrad.addColorStop(1,'rgba(255,255,255,.32)');
+  glassGrad.addColorStop(0,'rgba(255,255,255,.48)');
+  glassGrad.addColorStop(.18,'rgba(244,251,255,.22)');
+  glassGrad.addColorStop(.48,'rgba(190,232,255,.18)');
+  glassGrad.addColorStop(.78,'rgba(108,190,248,.15)');
+  glassGrad.addColorStop(1,'rgba(255,255,255,.35)');
   ctx.fillStyle=glassGrad;
-  ctx.strokeStyle='rgba(235,250,255,.92)'; ctx.lineWidth=Math.max(3,r*.055);
+  ctx.strokeStyle='rgba(238,250,255,.94)'; ctx.lineWidth=Math.max(3,r*.055);
   roundedPoly(cupPath, r*.10); ctx.fill(); ctx.stroke();
-  // Rim ellipse and base.
   ctx.shadowBlur=0;
-  ctx.strokeStyle='rgba(255,255,255,.88)'; ctx.lineWidth=Math.max(2,r*.035);
+
+  // rim / base
+  ctx.strokeStyle='rgba(255,255,255,.95)'; ctx.lineWidth=Math.max(2,r*.035);
   ctx.beginPath(); ctx.ellipse(x,topY,topW/2,r*.12,0,0,Math.PI*2); ctx.stroke();
+  ctx.strokeStyle='rgba(210,239,255,.82)';
   ctx.beginPath(); ctx.ellipse(x,botY,botW/2,r*.08,0,0,Math.PI*2); ctx.stroke();
+
+  // handle
+  ctx.strokeStyle='rgba(235,250,255,.90)'; ctx.lineWidth=Math.max(3,r*.050);
+  ctx.beginPath();
+  ctx.moveTo(x+topW*.42, y-r*.18);
+  ctx.bezierCurveTo(x+r*.92, y-r*.10, x+r*.92, y+r*.34, x+topW*.22, y+r*.30);
+  ctx.stroke();
+  ctx.strokeStyle='rgba(170,222,255,.34)'; ctx.lineWidth=Math.max(2,r*.028);
+  ctx.beginPath();
+  ctx.moveTo(x+topW*.37, y-r*.10);
+  ctx.bezierCurveTo(x+r*.72, y-r*.02, x+r*.72, y+r*.24, x+topW*.20, y+r*.18);
+  ctx.stroke();
+
   if(filled){
-    const waterY=y+r*.10;
-    const waterH=botY-waterY-r*.03;
+    const waterY=y-r*.20;
+    const waterH=botY-waterY-r*.02;
     const waterGrad=ctx.createLinearGradient(x,waterY,x,botY);
-    waterGrad.addColorStop(0,'rgba(95,219,255,.85)');
-    waterGrad.addColorStop(1,'rgba(22,135,255,.65)');
+    waterGrad.addColorStop(0,'rgba(140,228,255,.90)');
+    waterGrad.addColorStop(.45,'rgba(79,190,255,.84)');
+    waterGrad.addColorStop(1,'rgba(22,125,232,.72)');
     ctx.save(); roundedPoly(cupPath,r*.08); ctx.clip();
-    ctx.fillStyle=waterGrad; ctx.fillRect(x-topW*.46,waterY,topW*.92,waterH);
-    ctx.strokeStyle='rgba(230,255,255,.75)'; ctx.lineWidth=2;
-    ctx.beginPath(); ctx.ellipse(x,waterY,topW*.38,r*.07,0,0,Math.PI*2); ctx.stroke();
+    ctx.fillStyle=waterGrad; ctx.fillRect(x-topW*.48,waterY,topW*.96,waterH);
+    // water surface
+    ctx.strokeStyle='rgba(238,255,255,.88)'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.ellipse(x,waterY,topW*.39,r*.07,0,0,Math.PI*2); ctx.stroke();
+    // subtle refraction
+    ctx.fillStyle='rgba(255,255,255,.12)';
+    ctx.beginPath(); ctx.ellipse(x-r*.08,y+r*.20,r*.22,r*.34,0,0,Math.PI*2); ctx.fill();
     ctx.restore();
   }
-  // Bright vertical highlight.
-  ctx.strokeStyle='rgba(255,255,255,.70)'; ctx.lineWidth=Math.max(2,r*.026);
+  // highlights
+  ctx.strokeStyle='rgba(255,255,255,.72)'; ctx.lineWidth=Math.max(2,r*.026);
   ctx.beginPath(); ctx.moveTo(x-topW*.28,topY+r*.12); ctx.lineTo(x-botW*.22,botY-r*.12); ctx.stroke();
+  ctx.strokeStyle='rgba(210,242,255,.55)'; ctx.lineWidth=Math.max(1.5,r*.018);
+  ctx.beginPath(); ctx.moveTo(x+topW*.18,topY+r*.16); ctx.lineTo(x+botW*.12,botY-r*.16); ctx.stroke();
   ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,Math.round(r*.20))}px sans-serif`; ctx.textAlign='center';
-  ctx.fillText(label,x,y+r*1.02);
+  ctx.fillText(label,x,y+r*1.08);
   ctx.restore();
 }
 function drawPitcher(o){
@@ -1409,8 +1591,60 @@ function drawPitcher(o){
   ctx.restore();
 }
 function drawMouth(o){ if(!o)return; ctx.fillStyle=o.actual?'rgba(96,230,255,.24)':'rgba(255,209,102,.20)'; ctx.strokeStyle=o.actual?'rgba(96,230,255,.95)':'rgba(255,209,102,.90)'; ctx.lineWidth=4; ctx.setLineDash(o.actual?[]:[8,6]); ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText(o.actual?'실제 입 위치':'입 위치 추정',o.x,o.y+5); }
-function drawTargets(){ if(!target)return; if(target.kind==='bubble') drawBubble(target); if(target.kind==='air_bubbles' && target.bubbles){ for(const b of target.bubbles){ drawAirBubble(b, b.id===target.activeId); } if(target.anchor){ ctx.fillStyle='rgba(255,255,255,.88)'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center'; ctx.fillText(`남은 물방울 ${remainingBubbles()}개`, target.anchor.x, Math.max(26, target.anchor.y-18)); } } if(target.cup) drawCup(target.cup,target.cup.filled,'물컵'); if(target.pitcher) drawPitcher(target.pitcher); if(target.mouth) drawMouth(target.mouth); }
-function drawParticles(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }
+function drawTable(o){
+  if(!o) return;
+  const y=o.y || canvas.height*0.88;
+  const h=canvas.height*0.16;
+  if(drawSprite('table_wood', canvas.width/2, y+h*.18, canvas.width, h*1.35, .98)) { ctx.strokeStyle='rgba(255,255,255,.24)'; ctx.lineWidth=2; ctx.beginPath(); ctx.moveTo(0,y-h*.28); ctx.lineTo(canvas.width,y-h*.28); ctx.stroke(); return; }
+
+  const top=y-h*0.28;
+  const grad=ctx.createLinearGradient(0,top,0,y+h*0.68);
+  grad.addColorStop(0,'rgba(150,106,63,.36)');
+  grad.addColorStop(.5,'rgba(122,80,44,.62)');
+  grad.addColorStop(1,'rgba(78,48,22,.82)');
+  ctx.fillStyle=grad;
+  ctx.fillRect(0,top,canvas.width,h);
+  // wood plank lines for more realistic table impression
+  for(let i=0;i<10;i++){
+    const yy=top + (i+1)*(h/11);
+    ctx.strokeStyle=i%2===0?'rgba(255,255,255,.06)':'rgba(45,22,8,.14)';
+    ctx.lineWidth=i%2===0?1:1.2;
+    ctx.beginPath(); ctx.moveTo(0,yy); ctx.lineTo(canvas.width,yy); ctx.stroke();
+  }
+  for(let i=0;i<7;i++){
+    const xx=(i+1)*(canvas.width/8);
+    ctx.strokeStyle='rgba(60,36,14,.16)'; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(xx,top+4); ctx.lineTo(xx,y+h-6); ctx.stroke();
+  }
+  ctx.strokeStyle='rgba(255,255,255,.22)'; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(0,top); ctx.lineTo(canvas.width,top); ctx.stroke();
+}
+function drawCupPlacementRing(cup){
+  if(!cup) return;
+  const x=cup.homeX, y=cup.homeY, r=cup.r*1.10;
+  ctx.save();
+  ctx.fillStyle='rgba(255,245,210,.10)';
+  ctx.strokeStyle='rgba(255,209,102,.94)'; ctx.lineWidth=3; ctx.setLineDash([8,7]);
+  ctx.beginPath(); ctx.ellipse(x,y+r*.62,r*.58,r*.16,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle='rgba(255,245,210,.95)'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center';
+  ctx.fillText('컵 놓는 위치',x,y+r*1.12);
+  ctx.restore();
+}
+function drawTargets(){
+  if(!target)return;
+  if(target.table) drawTable(target.table);
+  if(target.kind==='bubble') drawBubble(target);
+  if(target.kind==='air_bubbles' && target.bubbles){
+    for(const b of target.bubbles){ drawAirBubble(b, b.id===target.activeId); }
+    if(target.anchor){ ctx.fillStyle='rgba(255,255,255,.88)'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center'; ctx.fillText(`남은 물방울 ${remainingBubbles()}개`, target.anchor.x, Math.max(26, target.anchor.y-18)); }
+  }
+  if(target.cup && target.cup.attached) drawCupPlacementRing(target.cup);
+  if(target.cup) drawCup(target.cup,target.cup.filled,'물컵');
+  if(target.pitcher) drawPitcher(target.pitcher);
+  if(target.mouth) drawMouth(target.mouth);
+}
+function drawParticles(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }(){ particles=particles.filter(p=>p.life>0); for(const p of particles){ p.x+=p.vx; p.y+=p.vy; p.life--; ctx.fillStyle=`rgba(96,230,255,${p.life/50})`; ctx.beginPath(); ctx.arc(p.x,p.y,4,0,Math.PI*2); ctx.fill(); } }
 function drawHand(lm){ const con=[[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]]; ctx.strokeStyle='rgba(51,209,122,.95)'; ctx.fillStyle='#33d17a'; ctx.lineWidth=3; for(const [a,b] of con){ ctx.beginPath(); ctx.moveTo(lm[a].x*canvas.width,lm[a].y*canvas.height); ctx.lineTo(lm[b].x*canvas.width,lm[b].y*canvas.height); ctx.stroke(); } for(let i=0;i<lm.length;i++){ const r=[4,8,12,16,20].includes(i)?6:4; ctx.beginPath(); ctx.arc(lm[i].x*canvas.width,lm[i].y*canvas.height,r,0,Math.PI*2); ctx.fill(); } }
 function renderLoop(){
   if(!running)return; animationId=requestAnimationFrame(renderLoop);
@@ -1436,7 +1670,7 @@ function bindButtons(){
   btn.stop.onclick = stopApp;
 }
 bindButtons();
-setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ③ 손가락 동작 보정 또는 자동 인식 → ④ 훈련 시작. 물방울은 훈련 시작 후에만 나타납니다.','info');
+setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 물방울과 물컵은 훈련 시작 후에만 나타납니다.','info');
 updateCalibrationStatus();
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>

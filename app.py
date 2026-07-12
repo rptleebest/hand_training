@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v24")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v25")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -282,7 +282,7 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v24</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v25</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
@@ -445,7 +445,7 @@ let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundA
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v24 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v25 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -570,32 +570,57 @@ function speakOnce(key, force=false){
   const text=messages[key]||key;
   speakText(key, text, force);
 }
-function speakText(key, text, force=false){
+function speakTextInternal(key, text, force=false, showOnScreen=true){
   const t=now();
-  if(!force && key===lastSpeakKey && t-lastSpeakAt<6200) return;
+  if(!force && key===lastSpeakKey && t-lastSpeakAt<6200) return false;
   lastSpeakKey=key; lastSpeakAt=t;
-  ui.sub.textContent=text;
+  if(showOnScreen) ui.sub.textContent=text;
   if(navigator.vibrate){
     if(['success','complete'].includes(key) || key.startsWith('rep_success')) navigator.vibrate([70,40,70]);
     else if(['wrong_hand','hand_not_found','low_quality'].includes(key) || key.startsWith('fail')) navigator.vibrate([140,60,140]);
     else navigator.vibrate(45);
   }
   playMessage(key,text);
+  return true;
+}
+function speakText(key, text, force=false){
+  return speakTextInternal(key, text, force, true);
+}
+function speakTextNoScreen(key, text, force=false){
+  return speakTextInternal(key, text, force, false);
 }
 function estimateSpeechDurationMs(text){
   if(CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only') return 900;
   const len=String(text||'').replace(/\s+/g,'').length;
-  // Conservative delay: measurement or target presentation must not start before the spoken guide is likely finished.
-  return clamp(1600 + len*120, 2600, 17000);
+  return clamp(1800 + len*135, 3000, 22000);
 }
-function speakTextWithCallback(key, text, force=false, callback=null){
-  speakText(key, text, force);
+function waitForSpeechCompletion(text, callback, generation, minExtraMs=350){
+  const started=now();
+  const minWait=estimateSpeechDurationMs(text) + minExtraMs;
+  const maxWait=Math.max(minWait+3500, 6500);
+  const tick=()=>{
+    if(generation!==speechGeneration) return;
+    const elapsed=now()-started;
+    const speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking);
+    const pending = speechActive || speechQueue.length>0 || speaking;
+    if(elapsed < minWait){ setTimeout(tick, 180); return; }
+    if(!pending || elapsed>=maxWait){
+      if(typeof callback==='function') callback();
+      return;
+    }
+    setTimeout(tick, 180);
+  };
+  setTimeout(tick, 180);
+}
+function speakTextWithCallback(key, text, force=false, callback=null, showOnScreen=true){
+  if(showOnScreen) speakText(key, text, force); else speakTextNoScreen(key, text, force);
   const myGen=speechGeneration;
-  const delay=estimateSpeechDurationMs(text) + 700;
-  setTimeout(()=>{
-    if(myGen!==speechGeneration) return;
-    if(typeof callback==='function') callback();
-  }, delay);
+  if(CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only' || !soundUnlocked){
+    const delay=estimateSpeechDurationMs(text) + 400;
+    setTimeout(()=>{ if(myGen===speechGeneration && typeof callback==='function') callback(); }, delay);
+    return;
+  }
+  waitForSpeechCompletion(text, callback, myGen, 500);
 }
 function setCalProgress(pct){
   const p=clamp(pct,0,1);
@@ -743,26 +768,24 @@ function startTraining(){
     speakText('wait_cal_done','보정이 진행 중입니다. 보정이 끝난 뒤 훈련 시작 버튼을 누르세요.',true);
     return;
   }
-  const calibrated = !!(openMetrics && closeMetrics);
   const run=trainingRunId;
   paused=false;
   trainingActive=false;
   target=null; particles=[]; holdStart=null; successLock=false;
   stage='training_instruction'; state='training_instruction'; updateUI();
-  const modeText = calibrated ? '환자별 손가락 동작 보정 기준으로 훈련합니다.' : '손가락 동작 보정 없이 자동 손동작 기준으로 훈련합니다. 필요하면 손동작 인정 기준을 낮춰 작은 움직임도 인정할 수 있습니다.';
-  const intro = `${modeText} ${taskIntroText()} 안내가 끝난 뒤 화면에 목표물이 나타납니다. 안내 중에는 아직 측정하거나 성공으로 기록하지 않습니다.`;
-  setInstruction('훈련 안내 중','아직 목표물을 표시하지 않습니다. 음성 안내가 끝난 뒤 훈련이 시작됩니다.','warn');
+  const intro = conciseTrainingIntroText();
+  // 화면에는 긴 훈련 안내 문장을 표시하지 않고, 음성이 끝난 뒤에만 목표물을 생성합니다.
+  setInstruction('훈련 준비 중','', 'warn');
   speakTextWithCallback('task_intro_'+run, intro, true, ()=>{
     if(run!==trainingRunId || !running || paused || combinedCalActive) return;
     stage='training_prepare'; state='training_prepare'; target=null; particles=[]; updateUI();
-    setInstruction('훈련 시작 준비','잠시 후 목표물이 나타납니다. 준비 자세를 유지하세요.','warn');
-    speakText('training_start_now_'+run, '이제 훈련을 시작합니다. 목표물이 나타나면 화면 안내에 따라 움직이세요.', true);
-    setTimeout(()=>{
+    setInstruction('곧 시작합니다','', 'warn');
+    speakTextWithCallback('training_start_now_'+run, '시작하세요.', true, ()=>{
       if(run!==trainingRunId || !running || paused || combinedCalActive) return;
       resetGame(false);
-      speakText('rep_start_'+targetSerial, taskStartText(), true);
-    }, CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only' ? 900 : 2800);
-  });
+      setInstruction('훈련 시작','', 'ready');
+    }, false);
+  }, false);
 }
 
 function abortTraining(){
@@ -776,7 +799,7 @@ function resetGame(announce=true){
   trainingActive=true; paused=false;
   score=0; attempts=0; successes=0; failureCount=0; reactionTimes=[]; successTimes=[]; target=null; stage='none'; holdStart=null; overlapStart=null; reactionStart=null; particles=[]; gameStartTime=now(); state='waiting_hand'; ui.downloadArea.innerHTML=''; neutralTilt=null; successLock=false; targetSerial=0; lastStepId=''; stepStartedAt=now(); lastFailureAt=0; resetBubbleOpenGate(); updateUI(); spawnTaskTarget();
   if(announce){
-    speakText('task_intro_'+targetSerial, taskIntroText(), true);
+    speakTextNoScreen('task_intro_'+targetSerial, taskIntroText(), true);
   }
 }
 function gestureActionText(){
@@ -786,9 +809,17 @@ function gestureActionText(){
 }
 function taskIntroText(){
   if(CONFIG.exercise.taskType==='hand_bubbles'){
-    return `${calibrationRequiredNotice()} 물방울 잡아 터뜨리기 훈련을 시작합니다. 목표는 총 ${CONFIG.targetCount}개입니다. 먼저 손을 편안하게 펴고 화면 안에 보여 주세요. 화면 속 얼굴 아래쪽에 여러 개의 물방울이 나타납니다. 물방울 하나를 선택해서 손바닥 중심을 물방울 안으로 천천히 가져가세요. 손바닥 점이 닿는 것만으로는 성공이 아닙니다. 물방울 안에서 손가락을 굽혀 손을 쥐고, 안내가 끝날 때까지 잠시 유지해야 물방울이 터집니다. 물방울이 터지면 손을 다시 편안하게 펴고 다음 물방울로 이동하세요. 모든 물방울이 사라지면 성공적으로 종료됩니다.`;
+    return `${calibrationRequiredNotice()} 물방울 잡아 터뜨리기 훈련입니다. 물방울 안에서 먼저 손을 펴고, 그 다음 같은 물방울 안에서 손을 쥐세요.`;
   }
-  return `${CONFIG.exercise.label} 훈련을 시작합니다. 목표는 총 ${CONFIG.targetCount}회입니다. 환자분은 화면 안내에 따라 한 단계씩 수행하고, 성공하면 다시 처음 자세에서 같은 과정을 반복합니다. ${taskStartText()}`;
+  return `${CONFIG.exercise.label} 훈련입니다. ${taskStartText()}`;
+}
+function conciseTrainingIntroText(){
+  const t=CONFIG.exercise.taskType;
+  if(t==='cup_drink') return `물컵 훈련을 시작합니다. 컵을 쥐고 입 위치로 옮긴 뒤, 빈 컵을 다시 탁자 위 원래 위치에 놓으세요. 안내가 끝나면 시작합니다.`;
+  if(t==='hand_bubbles') return `물방울 훈련을 시작합니다. 물방울 안에서 먼저 손을 펴고, 그 다음 같은 물방울 안에서 손을 쥐세요. 안내가 끝나면 시작합니다.`;
+  if(CONFIG.exercise.gesture==='pinch') return `작은 물방울 집기 훈련을 시작합니다. 검지 끝을 물방울에 맞춘 뒤 엄지와 검지를 맞대세요. 안내가 끝나면 시작합니다.`;
+  if(CONFIG.exercise.gesture==='open') return `손 펴기 훈련을 시작합니다. 물방울 위에서 손가락을 충분히 펴세요. 안내가 끝나면 시작합니다.`;
+  return `훈련을 시작합니다. 안내가 끝나면 시작합니다.`;
 }
 function taskStartText(){
   const rep=Math.min(score+1, CONFIG.targetCount);
@@ -1023,7 +1054,7 @@ function onSuccess(){
   const thisRun=trainingRunId;
   setTimeout(()=>{ if(thisRun===trainingRunId && trainingActive && running&&!paused&&state!=='complete'){
     if(CONFIG.exercise.taskType==='hand_bubbles' && target && target.kind==='air_bubbles'){ holdStart=null; successLock=false; resetBubbleOpenGate(); stage='air_seek'; state='air_bubble_seek'; reactionStart=now(); target.activeId=null; }
-    else{ spawnTaskTarget(); speakText('rep_start_'+targetSerial, taskStartText(), true); }
+    else{ spawnTaskTarget(); speakTextNoScreen('rep_start_'+targetSerial, taskStartText(), true); }
   } }, 1500);
 }
 function addParticles(){ const pop=target?.lastPop || target; const px=(pop?.x||target?.x||target?.cup?.x||canvas.width/2), py=(pop?.y||target?.y||target?.cup?.y||canvas.height/2); for(let i=0;i<24;i++){ particles.push({x:px, y:py, vx:(Math.random()*2-1)*3.4, vy:(Math.random()*2-1)*3.4, life:32+Math.random()*24}); } }

@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v25")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v26")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.sidebar:
@@ -282,12 +282,12 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v25</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v26</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="outputCanvas"></canvas>
-      <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 눌러야 물방울이 나타납니다.</div></div>
+      <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 눌러야 선택한 훈련 목표가 나타납니다.</div></div>
     </div>
     <div class="sidePanel">
       <div class="buttons">
@@ -403,14 +403,14 @@ const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.ge
 
 const messages = {
   sound_test:'소리 안내가 활성화되었습니다.',
-  app_intro:'앱 사용 순서를 안내합니다. 첫 번째, 카메라만 켜기 버튼을 누릅니다. 두 번째, 필요한 경우 손가락 동작 보정 버튼을 눌러 환자분의 손 펴기와 손 쥐기 범위를 저장합니다. 보정을 하지 않아도 훈련 시작은 가능하며, 이 경우 자동 기준으로 손가락 동작을 인식합니다. 세 번째, 훈련 시작 버튼을 누릅니다. 물방울 안으로 손을 가져간 뒤, 먼저 손을 펴고, 그 다음 손가락을 굽혀 쥐면 물방울이 터집니다.',
+  app_intro:'앱 사용 순서를 안내합니다. 카메라만 켜기를 누른 뒤, 필요하면 손가락 동작 보정을 합니다. 훈련 시작을 누르면 선택한 과제 안내가 끝난 뒤 훈련이 시작됩니다.',
   start_camera:'카메라만 켜졌습니다. 지금은 훈련 전 준비 상태입니다. 필요하면 손가락 동작 보정 버튼을 누르세요. 보정을 하지 않고 훈련 시작 버튼을 누르면 자동 손동작 기준으로 훈련합니다.',
   hand_not_found:'손이 보이지 않습니다. 손 전체가 화면에 들어오도록 조정하세요.',
   wrong_hand:'선택한 손이 아닙니다. 훈련 손을 다시 확인하세요.',
   low_quality:'손 인식이 불안정합니다. 조명을 밝게 하고 손 가림을 줄여 주세요.',
   finger_cal_open:'손가락 동작 보정을 시작합니다. 먼저 손가락을 최대한 펴는 단계입니다. 설명이 끝난 뒤 이제 시작하세요라는 안내가 나오면, 그때부터 손가락을 최대한 편 상태로 유지해 주세요.',
   finger_cal_close:'이번에는 손가락을 최대한 구부려 손을 쥐는 단계입니다. 설명이 끝난 뒤 이제 시작하세요라는 안내가 나오면, 그때부터 손가락을 최대한 구부린 상태로 유지해 주세요.',
-  finger_cal_done:'굽힘 동작이 인식되었습니다. 손가락 동작 보정이 완료되었습니다. 손 인식 표시선을 잠시 숨깁니다. 이제 훈련 시작 버튼을 눌러 물방울 훈련을 시작하세요.',
+  finger_cal_done:'굽힘 동작이 인식되었습니다. 손가락 동작 보정이 완료되었습니다. 손 인식 표시선을 잠시 숨깁니다. 이제 훈련 시작 버튼을 눌러 선택한 훈련을 시작하세요.',
   cal_done:'보정이 완료되었습니다.',
   seek_target:'목표 위치로 손을 가져가세요.',
   now_gesture: CONFIG.exercise.gesture==='pinch' ? '엄지와 검지를 맞대어 집으세요.' : (CONFIG.exercise.gesture==='open' ? '손을 충분히 펴세요.' : '손을 쥐세요.'),
@@ -427,7 +427,7 @@ const messages = {
   air_bubble_hold:'좋습니다. 물방울을 잡은 상태를 잠시 유지하세요.',
   pause:'훈련을 일시정지합니다.',
   resume:'훈련을 다시 시작합니다.',
-  training_start:'훈련을 시작합니다. 화면 안내와 음성 안내에 따라 물방울을 하나씩 터뜨리세요.',
+  training_start:'훈련을 시작합니다. 화면 안내와 음성 안내에 따라 선택한 과제를 수행하세요.',
   training_abort:'훈련을 중단했습니다. 음성 안내도 중단했습니다. 카메라는 켜진 상태입니다. 다른 옵션을 선택하거나 훈련 시작 버튼을 눌러 다시 시작하세요.'
 };
 
@@ -445,7 +445,7 @@ let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundA
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v25 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v26 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -479,7 +479,15 @@ function resetSessionForNewAction(status='새 작업'){
   calStepId++;
   calWaitingForStart=false;
 }
-function appIntroText(){ return messages.app_intro; }
+function selectedTaskIntroBrief(){
+  const t=CONFIG.exercise.taskType;
+  if(t==='cup_drink') return '현재 선택된 과제는 물컵 마시기입니다. 컵을 쥐고 입 위치로 옮긴 뒤, 빈 컵을 다시 탁자 위 원래 위치에 놓습니다.';
+  if(t==='hand_bubbles') return '현재 선택된 과제는 공기방울 잡기입니다. 방울 안에서 먼저 손을 펴고, 그 다음 같은 방울 안에서 손을 쥡니다.';
+  if(CONFIG.exercise.gesture==='pinch') return '현재 선택된 과제는 작은 물방울 집기입니다. 검지 끝을 목표에 맞춘 뒤 엄지와 검지를 맞댑니다.';
+  if(CONFIG.exercise.gesture==='open') return '현재 선택된 과제는 손 펴기입니다. 목표 위에서 손가락을 충분히 폅니다.';
+  return '선택한 과제를 수행합니다.';
+}
+function appIntroText(){ return `${messages.app_intro} ${selectedTaskIntroBrief()}`; }
 function announceAppIntro(force=false){ if(!force && !soundUnlocked) return; speakText('app_intro', appIntroText(), true); }
 
 function pickKoreanVoice(){
@@ -741,9 +749,9 @@ async function startCameraOnly(){
     video.srcObject=stream; await video.play();
     canvas.width=video.videoWidth||960; canvas.height=video.videoHeight||720;
     running=true; cameraOnlyReady=true; trainingActive=false; paused=false; target=null; particles=[]; stage='camera_only_ready'; state='camera_only_ready'; holdStart=null; updateUI();
-    speakText('camera_ready_sequence', '카메라가 켜졌습니다. 지금은 훈련 전 준비 상태이며 물방울은 나타나지 않습니다. 환자별 손 상태를 반영하려면 손가락 동작 보정 버튼을 누르세요. 보정을 하지 않고 바로 훈련 시작을 눌러도 자동 손동작 기준으로 훈련할 수 있습니다.', true);
+    speakText('camera_ready_sequence', `카메라가 켜졌습니다. 지금은 훈련 전 준비 상태입니다. 필요하면 손가락 동작 보정 버튼을 누르세요. 훈련 시작 버튼을 누르면 ${selectedTaskIntroBrief()} 안내 후 목표가 나타납니다.`, true);
     setInstruction('카메라만 켜졌습니다','선택: ③ 손가락 동작 보정 또는 ④ 훈련 시작. 보정을 하지 않아도 자동 기준으로 훈련할 수 있습니다.','ready');
-    log('카메라만 켜졌습니다. 아직 훈련은 시작되지 않았습니다. 이 상태에서는 물방울을 생성하지 않습니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 누르면 자동 또는 보정 기준으로 시작합니다.');
+    log('카메라만 켜졌습니다. 아직 훈련은 시작되지 않았습니다. 이 상태에서는 선택한 훈련 목표를 생성하지 않습니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 누르면 자동 또는 보정 기준으로 시작합니다.');
     renderLoop();
   }catch(e){ console.error(e); setInstruction('카메라 또는 모델을 시작할 수 없습니다','HTTPS 접속, 카메라 권한, 브라우저를 확인하세요.','bad'); log(String(e)); }
 }
@@ -782,8 +790,8 @@ function startTraining(){
     setInstruction('곧 시작합니다','', 'warn');
     speakTextWithCallback('training_start_now_'+run, '시작하세요.', true, ()=>{
       if(run!==trainingRunId || !running || paused || combinedCalActive) return;
-      resetGame(false);
       setInstruction('훈련 시작','', 'ready');
+      setTimeout(()=>{ if(run===trainingRunId && running && !paused && !combinedCalActive){ resetGame(false); } }, 350);
     }, false);
   }, false);
 }
@@ -792,7 +800,7 @@ function abortTraining(){
   resetSessionForNewAction('훈련 중단');
   if(!running){ setInstruction('카메라가 꺼져 있습니다','① 카메라만 켜기 버튼으로 다시 시작할 수 있습니다.','info'); return; }
   trainingActive=false; paused=false; calMode=null; target=null; particles=[]; stage='camera_only_ready'; state='camera_only_ready'; holdStart=null; overlapStart=null; reactionStart=null; successLock=false; resetBubbleOpenGate(); updateUI();
-  setInstruction('훈련을 중단했습니다','음성 안내와 물방울 과제를 모두 중단했습니다. 카메라는 켜진 상태입니다. 보정 또는 훈련 시작을 다시 선택하세요.','warn');
+  setInstruction('훈련을 중단했습니다','음성 안내와 선택한 훈련 과제를 모두 중단했습니다. 카메라는 켜진 상태입니다. 보정 또는 훈련 시작을 다시 선택하세요.','warn');
   speakText('training_abort_now', '훈련을 중단했습니다. 음성 안내도 중단했습니다. 카메라는 켜진 상태입니다. 필요하면 보정을 다시 하거나 훈련 시작 버튼을 눌러 다시 시작하세요.', true);
 }
 function resetGame(announce=true){
@@ -809,23 +817,23 @@ function gestureActionText(){
 }
 function taskIntroText(){
   if(CONFIG.exercise.taskType==='hand_bubbles'){
-    return `${calibrationRequiredNotice()} 물방울 잡아 터뜨리기 훈련입니다. 물방울 안에서 먼저 손을 펴고, 그 다음 같은 물방울 안에서 손을 쥐세요.`;
+    return `${calibrationRequiredNotice()} 공기방울 잡기 훈련입니다. 방울 안에서 먼저 손을 펴고, 그 다음 같은 방울 안에서 손을 쥐세요.`;
   }
   return `${CONFIG.exercise.label} 훈련입니다. ${taskStartText()}`;
 }
 function conciseTrainingIntroText(){
   const t=CONFIG.exercise.taskType;
-  if(t==='cup_drink') return `물컵 훈련을 시작합니다. 컵을 쥐고 입 위치로 옮긴 뒤, 빈 컵을 다시 탁자 위 원래 위치에 놓으세요. 안내가 끝나면 시작합니다.`;
-  if(t==='hand_bubbles') return `물방울 훈련을 시작합니다. 물방울 안에서 먼저 손을 펴고, 그 다음 같은 물방울 안에서 손을 쥐세요. 안내가 끝나면 시작합니다.`;
-  if(CONFIG.exercise.gesture==='pinch') return `작은 물방울 집기 훈련을 시작합니다. 검지 끝을 물방울에 맞춘 뒤 엄지와 검지를 맞대세요. 안내가 끝나면 시작합니다.`;
-  if(CONFIG.exercise.gesture==='open') return `손 펴기 훈련을 시작합니다. 물방울 위에서 손가락을 충분히 펴세요. 안내가 끝나면 시작합니다.`;
-  return `훈련을 시작합니다. 안내가 끝나면 시작합니다.`;
+  if(t==='cup_drink') return '물컵 마시기 훈련입니다. 컵을 쥐고 입 위치로 옮긴 뒤, 빈 컵을 원래 위치에 놓습니다. 안내 후 시작합니다.';
+  if(t==='hand_bubbles') return '공기방울 잡기 훈련입니다. 방울 안에서 먼저 손을 펴고, 그 다음 같은 방울 안에서 손을 쥡니다. 안내 후 시작합니다.';
+  if(CONFIG.exercise.gesture==='pinch') return '작은 물방울 집기 훈련입니다. 검지 끝을 맞추고 엄지와 검지를 맞댑니다. 안내 후 시작합니다.';
+  if(CONFIG.exercise.gesture==='open') return '손 펴기 훈련입니다. 목표 위에서 손가락을 충분히 폅니다. 안내 후 시작합니다.';
+  return '훈련을 시작합니다. 안내 후 시작합니다.';
 }
 function taskStartText(){
   const rep=Math.min(score+1, CONFIG.targetCount);
   const t=CONFIG.exercise.taskType;
   if(t==='cup_drink') return `${rep}회차입니다. 먼저 탁자 위 물컵으로 손을 가져가세요. 컵을 잡은 뒤 실제 입 위치까지 옮기고 잠시 멈춥니다. 물이 사라지면 빈 컵을 다시 원래 탁자 위치에 놓으세요.`;
-  if(t==='hand_bubbles') return `남은 물방울 중 하나로 손을 천천히 이동하세요. 물방울 안에 들어가면 손가락을 굽혀 쥐고, 잠시 유지합니다.`;
+  if(t==='hand_bubbles') return `남은 방울 중 하나로 손을 천천히 이동하세요. 방울 안에 들어가면 먼저 손을 펴고, 그 다음 같은 방울 안에서 손가락을 굽혀 쥡니다.`;
   return `${rep}회차입니다. 손을 ${CONFIG.exercise.targetName} 위치로 가져간 뒤, ${gestureActionText()}. 끝동작은 잠시 유지합니다.`;
 }
 function taskStartMessage(){ const t=CONFIG.exercise.taskType; if(t==='cup_drink') return 'cup_reach'; if(t==='hand_bubbles') return 'air_bubble_seek'; return 'seek_target'; }
@@ -1401,7 +1409,7 @@ function processGame(m,handed,handScore){
     if(stage==='training_instruction' || stage==='training_prepare'){ return; }
     if(!calMode && state!=='camera_only_ready'){
       state='camera_only_ready'; stage='camera_only_ready';
-      setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ④ 훈련 시작 버튼을 눌러야 물방울 또는 물컵 과제가 나타납니다.','ready');
+      setInstruction('카메라만 켜진 상태입니다','보정을 완료한 뒤 ④ 훈련 시작 버튼을 눌러야 선택한 훈련 과제가 나타납니다.','ready');
     }
     return;
   }
@@ -1750,7 +1758,7 @@ function bindButtons(){
   btn.stop.onclick = stopApp;
 }
 bindButtons();
-setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 물방울과 물컵은 훈련 시작 후에만 나타납니다.','info');
+setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 선택한 훈련 목표는 훈련 시작 후에만 나타납니다.','info');
 updateCalibrationStatus();
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>

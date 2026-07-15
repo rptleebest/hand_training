@@ -141,10 +141,10 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v28")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v29")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
-with st.sidebar:
+with st.expander("📱 훈련 설정: 스마트폰에서도 여기에서 조정", expanded=True):
     st.header("훈련 설정")
     exercise_key = st.selectbox(
         "훈련 과제",
@@ -259,9 +259,14 @@ HTML = r'''
   .videoPanel { position:relative; background:#000; border-radius:18px; overflow:hidden; min-height:320px; box-shadow:0 10px 30px rgba(0,0,0,.28); }
   video { position:absolute; left:-9999px; top:-9999px; width:1px; height:1px; opacity:0; }
   canvas { width:100%; display:block; background:#06101d; aspect-ratio:4/3; }
-  .overlayBanner { position:absolute; left:12px; right:12px; top:12px; padding:12px 14px; border-radius:16px; background:rgba(7,13,24,.80); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.12); }
+  .overlayBanner { display:none !important; }
   #bigInstruction { font-size:clamp(21px,3.5vw,33px); font-weight:900; line-height:1.25; }
   #subInstruction { margin-top:4px; color:#d2e4ff; font-size:clamp(13px,2.3vw,17px); }
+  .calOverlay { display:none; position:absolute; right:10px; top:50%; transform:translateY(-50%); flex-direction:column; align-items:center; gap:8px; padding:10px 8px; border-radius:16px; background:rgba(7,13,24,.62); border:1px solid rgba(255,255,255,.16); backdrop-filter:blur(7px); z-index:5; }
+  .calOverlayTitle { writing-mode:vertical-rl; text-orientation:mixed; color:#eaf4ff; font-weight:850; font-size:12px; letter-spacing:.04em; }
+  .calOverlayMeter { width:30px; height:150px; border-radius:16px; background:rgba(255,255,255,.12); border:1px solid rgba(255,255,255,.22); position:relative; overflow:hidden; }
+  .calOverlayFill { position:absolute; left:0; right:0; bottom:0; height:0%; background:linear-gradient(180deg, rgba(51,209,122,.98), rgba(87,166,255,.98)); transition:height .10s linear; }
+  .calOverlayPercent { color:#fff; font-weight:900; font-size:15px; text-shadow:0 1px 5px rgba(0,0,0,.5); }
   .sidePanel { background:var(--panel); border:1px solid rgba(255,255,255,.10); border-radius:18px; padding:14px; }
   .buttons { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
   button { appearance:none; border:0; border-radius:14px; padding:11px 13px; font-weight:850; background:#eaf4ff; color:#06101d; min-height:42px; cursor:pointer; }
@@ -276,18 +281,19 @@ HTML = r'''
   .calMeterFill { position:absolute; left:0; right:0; bottom:0; height:0%; background:linear-gradient(180deg, rgba(51,209,122,.95), rgba(87,166,255,.95)); transition:height .12s linear; }
   .calMeterText { font-weight:900; font-size:18px; color:#fff; min-width:64px; }
   .small { color:var(--muted); font-size:12px; line-height:1.45; }
-  .calBox { margin-top:10px; border-radius:14px; padding:10px; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); }
+  .calBox { display:none; }
   a.download { display:block; margin-top:8px; color:#9fd0ff; word-break:break-all; }
 </style>
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v28</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v29</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="outputCanvas"></canvas>
       <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 눌러야 선택한 훈련 목표가 나타납니다.</div></div>
+      <div class="calOverlay" id="calOverlay"><div class="calOverlayTitle" id="calOverlayTitle">보정</div><div class="calOverlayMeter"><div class="calOverlayFill" id="calOverlayFill"></div></div><div class="calOverlayPercent" id="calOverlayPercent">0%</div></div>
     </div>
     <div class="sidePanel">
       <div class="buttons">
@@ -397,7 +403,7 @@ const video = document.getElementById('webcam');
 const canvas = document.getElementById('outputCanvas');
 const ctx = canvas.getContext('2d');
 const ui = {
-  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), calMeterFill: document.getElementById('calMeterFill'), calPercent: document.getElementById('calPercentText'), downloadArea: document.getElementById('downloadArea')
+  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), calMeterFill: document.getElementById('calMeterFill'), calPercent: document.getElementById('calPercentText'), downloadArea: document.getElementById('downloadArea'), calOverlay: document.getElementById('calOverlay'), calOverlayFill: document.getElementById('calOverlayFill'), calOverlayPercent: document.getElementById('calOverlayPercent'), calOverlayTitle: document.getElementById('calOverlayTitle')
 };
 const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.getElementById('btnSound'), fingerCal:document.getElementById('btnFingerCal'), train:document.getElementById('btnTrainStart'), abort:document.getElementById('btnAbort'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
 
@@ -446,7 +452,7 @@ let smoothLandmarks=null, smoothedGesture=0, smoothedCursor=null, lastHandFoundA
 let currentMouth=null, smoothedMouth=null, mouthDetectedAt=0, lastMouthVoice=0, successLock=false;
 let particles=[];
 
-ui.modeLabel.textContent = `v28 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
+ui.modeLabel.textContent = `v29 준비됨 · ${CONFIG.exercise.label} · ${CONFIG.levelConfig.name}`;
 
 function now(){ return performance.now(); }
 function clamp(v,lo,hi){ return Math.max(lo,Math.min(hi,v)); }
@@ -654,10 +660,16 @@ function speakTextWithCallback(key, text, force=false, callback=null, showOnScre
 }
 function setCalProgress(pct){
   const p=clamp(pct,0,1);
-  if(ui.calFill) ui.calFill.style.width=`${Math.round(p*100)}%`;
-  if(ui.calMeterFill) ui.calMeterFill.style.height=`${Math.round(p*100)}%`;
-  if(ui.calPercent) ui.calPercent.textContent=`${Math.round(p*100)}%`;
+  const pctText=`${Math.round(p*100)}%`;
+  if(ui.calFill) ui.calFill.style.width=pctText;
+  if(ui.calMeterFill) ui.calMeterFill.style.height=pctText;
+  if(ui.calPercent) ui.calPercent.textContent=pctText;
+  if(ui.calOverlayFill) ui.calOverlayFill.style.height=pctText;
+  if(ui.calOverlayPercent) ui.calOverlayPercent.textContent=pctText;
+  const show = !!(combinedCalActive || calMode || stage==='calibration_instruction' || stage==='calibration_measure');
+  if(ui.calOverlay) ui.calOverlay.style.display = show ? 'flex' : 'none';
 }
+function setCalOverlayLabel(label){ if(ui.calOverlayTitle) ui.calOverlayTitle.textContent=label || '보정'; }
 function resetCalProgress(){ setCalProgress(0); }
 function playCalibrationBeepDone(){ beep(740,.08,.08); setTimeout(()=>beep(980,.10,.08),120); }
 function playMessage(key,text){
@@ -801,19 +813,15 @@ function startTraining(){
   const run=trainingRunId;
   paused=false;
   trainingActive=false;
-  target=null; particles=[]; holdStart=null; successLock=false;
-  stage='training_instruction'; state='training_instruction'; updateUI();
+  holdStart=null; successLock=false;
+  // 목표물을 먼저 보여 주고, 음성 안내 중에는 판정하지 않습니다.
+  prepareGamePreview();
+  stage='training_preview'; state='training_preview'; updateUI();
   const intro = conciseTrainingIntroText();
-  // 화면에는 긴 훈련 안내 문장을 표시하지 않고, 음성이 끝난 뒤에만 목표물을 생성합니다.
   setInstruction('훈련 준비 중','', 'warn');
   speakTextWithCallback('task_intro_'+run, intro, true, ()=>{
     if(run!==trainingRunId || !running || paused || combinedCalActive) return;
-    // 시작 음성 전에 목표물을 먼저 보여 줍니다. 단, 이 시점에는 아직 성공/실패 판정은 하지 않습니다.
-    prepareGamePreview();
-    stage = stage || 'training_preview';
-    state = 'training_preview';
-    setInstruction('목표 위치를 확인하세요','시작 안내 후 움직이세요.', 'ready');
-    speakTextWithCallback('training_start_now_'+run, '목표를 확인하세요. 시작하세요.', true, ()=>{
+    speakTextWithCallback('training_start_now_'+run, '시작하세요.', true, ()=>{
       if(run!==trainingRunId || !running || paused || combinedCalActive) return;
       activatePreparedGame();
     }, false);
@@ -835,7 +843,7 @@ function prepareGamePreview(){
   targetSerial=0; lastStepId=''; stepStartedAt=now(); lastFailureAt=0; lastStatusVoice=now(); resetBubbleOpenGate();
   updateUI();
   spawnTaskTarget();
-  setInstruction('목표 위치를 확인하세요','시작 안내 후 움직이세요.', 'ready');
+  setInstruction('목표 확인','', 'ready');
   updateUI();
 }
 function activatePreparedGame(){
@@ -905,7 +913,7 @@ function startFingerCalibration(){
     return;
   }
   trainingActive=false; trainingPreviewActive=false; paused=false; target=null; particles=[]; stage='calibration_instruction'; holdStart=null; resetBubbleOpenGate(); clearCalibrationTimers();
-  combinedCalActive=true; calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_open_instruction'; resetCalProgress(); updateUI();
+  combinedCalActive=true; calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_open_instruction'; setCalOverlayLabel('손 펴기 준비'); resetCalProgress(); updateUI();
   const id=calStepId;
   const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락 펴기 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 펼 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
   setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
@@ -933,7 +941,7 @@ function beginCalibrationPrepare(mode, id){
 }
 function beginCalibrationMeasurement(mode, id=calStepId){
   if(!calibrationScheduleGuard(id)) return;
-  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; calWaitingForStart=false; clearCalibrationTimers(); resetCalProgress();
+  calMode=mode; calSamples=[]; calStart=now(); calVoiceMilestone=-1; calWaitingForStart=false; clearCalibrationTimers(); setCalOverlayLabel(mode==='open'?'손 펴기':'손 쥐기'); resetCalProgress();
   state=mode==='open'?'cal_open_count':'cal_close_count';
   stage='calibration_measure';
   const title = mode==='open' ? '손 펴기 측정 중' : '손 쥐기 측정 중';
@@ -942,7 +950,7 @@ function beginCalibrationMeasurement(mode, id=calStepId){
 }
 function beginCloseCalibrationInstruction(){
   clearCalibrationTimers();
-  calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_close_instruction'; stage='calibration_instruction'; resetCalProgress();
+  calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_close_instruction'; stage='calibration_instruction'; setCalOverlayLabel('손 쥐기 준비'); resetCalProgress();
   const id=calStepId;
   const explain = '이번에는 손가락 굽힘 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 구부릴 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
   setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
@@ -1479,7 +1487,7 @@ function processGame(m,handed,handScore){
   }
   if(!trainingActive){
     if(trainingPreviewActive){
-      setInstruction('목표 위치를 확인하세요','시작 안내 후 움직이세요.', 'ready');
+      setInstruction('목표 확인','', 'ready');
       return;
     }
     target=null; particles=[];
@@ -1636,7 +1644,6 @@ function drawCup(o,filled=false,label='물컵'){
   const x=o.x,y=o.y,r=o.r;
   const spriteName = filled ? 'glass_cup_full' : 'glass_cup_empty';
   if(drawSprite(spriteName,x,y,r*2.05,r*2.05,1)){
-    ctx.save(); ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,Math.round(r*.20))}px sans-serif`; ctx.textAlign='center'; ctx.fillText(label,x,y+r*1.08); ctx.restore();
     return;
   }
   ctx.save();
@@ -1705,8 +1712,7 @@ function drawCup(o,filled=false,label='물컵'){
   ctx.beginPath(); ctx.moveTo(x-topW*.28,topY+r*.12); ctx.lineTo(x-botW*.22,botY-r*.12); ctx.stroke();
   ctx.strokeStyle='rgba(210,242,255,.55)'; ctx.lineWidth=Math.max(1.5,r*.018);
   ctx.beginPath(); ctx.moveTo(x+topW*.18,topY+r*.16); ctx.lineTo(x+botW*.12,botY-r*.16); ctx.stroke();
-  ctx.fillStyle='#fff'; ctx.font=`bold ${Math.max(13,Math.round(r*.20))}px sans-serif`; ctx.textAlign='center';
-  ctx.fillText(label,x,y+r*1.08);
+
   ctx.restore();
 }
 function drawPitcher(o){
@@ -1755,7 +1761,7 @@ function drawPitcher(o){
   ctx.fillText('물병',x,y+r*1.03);
   ctx.restore();
 }
-function drawMouth(o){ if(!o)return; ctx.fillStyle=o.actual?'rgba(96,230,255,.24)':'rgba(255,209,102,.20)'; ctx.strokeStyle=o.actual?'rgba(96,230,255,.95)':'rgba(255,209,102,.90)'; ctx.lineWidth=4; ctx.setLineDash(o.actual?[]:[8,6]); ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]); ctx.fillStyle='#fff'; ctx.font='bold 15px sans-serif'; ctx.textAlign='center'; ctx.fillText(o.actual?'실제 입 위치':'입 위치 추정',o.x,o.y+5); }
+function drawMouth(o){ if(!o)return; ctx.fillStyle=o.actual?'rgba(96,230,255,.24)':'rgba(255,209,102,.20)'; ctx.strokeStyle=o.actual?'rgba(96,230,255,.95)':'rgba(255,209,102,.90)'; ctx.lineWidth=4; ctx.setLineDash(o.actual?[]:[8,6]); ctx.beginPath(); ctx.arc(o.x,o.y,o.r,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.setLineDash([]);  }
 function drawTable(o){
   if(!o) return;
   const y=o.y || canvas.height*0.88;
@@ -1792,8 +1798,7 @@ function drawCupPlacementRing(cup){
   ctx.strokeStyle='rgba(255,209,102,.94)'; ctx.lineWidth=3; ctx.setLineDash([8,7]);
   ctx.beginPath(); ctx.ellipse(x,y+r*.62,r*.58,r*.16,0,0,Math.PI*2); ctx.fill(); ctx.stroke();
   ctx.setLineDash([]);
-  ctx.fillStyle='rgba(255,245,210,.95)'; ctx.font='bold 14px sans-serif'; ctx.textAlign='center';
-  ctx.fillText('컵 놓는 위치',x,y+r*1.12);
+
   ctx.restore();
 }
 function drawTargets(){
@@ -1802,7 +1807,7 @@ function drawTargets(){
   if(target.kind==='bubble') drawBubble(target);
   if(target.kind==='air_bubbles' && target.bubbles){
     for(const b of target.bubbles){ drawAirBubble(b, b.id===target.activeId); }
-    if(target.anchor){ ctx.fillStyle='rgba(255,255,255,.88)'; ctx.font='bold 18px sans-serif'; ctx.textAlign='center'; ctx.fillText(`남은 물방울 ${remainingBubbles()}개`, target.anchor.x, Math.max(26, target.anchor.y-18)); }
+
   }
   if(target.cup && target.cup.attached) drawCupPlacementRing(target.cup);
   if(target.cup) drawCup(target.cup,target.cup.filled,'물컵');
@@ -1835,7 +1840,7 @@ function bindButtons(){
   btn.stop.onclick = stopApp;
 }
 bindButtons();
-setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 선택한 훈련 목표는 훈련 시작 후에만 나타납니다.','info');
+setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 선택한 훈련 목표는 훈련 시작 버튼을 누르면 먼저 표시되고, 시작 안내 뒤 판정됩니다.','info');
 updateCalibrationStatus();
 log(`훈련 과제: ${CONFIG.exercise.label}\n목표 수: ${CONFIG.targetCount}\n훈련 손: ${CONFIG.affectedHand==='Any'?'자동':CONFIG.affectedHand}\n주의: 조명, 손 가림, 카메라 각도에 따라 인식이 흔들릴 수 있습니다.`);
 </script>

@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v29")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v30")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.expander("📱 훈련 설정: 스마트폰에서도 여기에서 조정", expanded=True):
@@ -259,6 +259,12 @@ HTML = r'''
   .videoPanel { position:relative; background:#000; border-radius:18px; overflow:hidden; min-height:320px; box-shadow:0 10px 30px rgba(0,0,0,.28); }
   video { position:absolute; left:-9999px; top:-9999px; width:1px; height:1px; opacity:0; }
   canvas { width:100%; display:block; background:#06101d; aspect-ratio:4/3; }
+  .cameraSizeControls { position:absolute; left:50%; bottom:10px; transform:translateX(-50%); z-index:9; display:flex; gap:7px; padding:6px; border-radius:999px; background:rgba(5,12,22,.52); border:1px solid rgba(255,255,255,.16); backdrop-filter:blur(7px); }
+  .cameraSizeControls button { min-height:34px; padding:7px 11px; border-radius:999px; font-size:13px; white-space:nowrap; }
+  .videoPanel.expandedCamera { position:fixed !important; inset:0 !important; width:100vw !important; height:100dvh !important; min-height:100dvh !important; z-index:99999 !important; border-radius:0 !important; background:#000; }
+  .videoPanel.expandedCamera canvas { width:100vw !important; height:100dvh !important; aspect-ratio:auto !important; object-fit:contain; }
+  .videoPanel.expandedCamera .cameraSizeControls { bottom:calc(12px + env(safe-area-inset-bottom)); }
+  body.cameraExpanded { overflow:hidden; }
   .overlayBanner { display:none !important; }
   #bigInstruction { font-size:clamp(21px,3.5vw,33px); font-weight:900; line-height:1.25; }
   #subInstruction { margin-top:4px; color:#d2e4ff; font-size:clamp(13px,2.3vw,17px); }
@@ -287,13 +293,14 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v29</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v30</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="outputCanvas"></canvas>
       <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 눌러야 선택한 훈련 목표가 나타납니다.</div></div>
       <div class="calOverlay" id="calOverlay"><div class="calOverlayTitle" id="calOverlayTitle">보정</div><div class="calOverlayMeter"><div class="calOverlayFill" id="calOverlayFill"></div></div><div class="calOverlayPercent" id="calOverlayPercent">0%</div></div>
+      <div class="cameraSizeControls"><button id="btnCamExpand" class="blue">화면 전체</button><button id="btnCamShrink">작게</button></div>
     </div>
     <div class="sidePanel">
       <div class="buttons">
@@ -399,13 +406,31 @@ function drawSprite(name,x,y,w,h,alpha=1){
   if(!im || !im.complete || !im.naturalWidth) return false;
   ctx.save(); ctx.globalAlpha=alpha; ctx.drawImage(im,x-w/2,y-h/2,w,h); ctx.restore(); return true;
 }
+function delay(ms){ return new Promise(resolve=>setTimeout(resolve, ms)); }
+function preloadSpriteImages(timeoutMs=700){
+  const names=Object.keys(IMAGE_ASSETS||{});
+  if(!names.length) return Promise.resolve();
+  return new Promise(resolve=>{
+    let left=names.length;
+    const done=()=>{ left--; if(left<=0){ clearTimeout(timer); resolve(); } };
+    const timer=setTimeout(resolve, timeoutMs);
+    for(const name of names){
+      const im=getSprite(name);
+      if(!im){ done(); continue; }
+      if(im.complete && im.naturalWidth){ done(); continue; }
+      const prevLoad=im.onload, prevErr=im.onerror;
+      im.onload=(e)=>{ try{ if(prevLoad) prevLoad.call(im,e); }catch(_){} done(); };
+      im.onerror=(e)=>{ try{ if(prevErr) prevErr.call(im,e); }catch(_){} done(); };
+    }
+  });
+}
 const video = document.getElementById('webcam');
 const canvas = document.getElementById('outputCanvas');
 const ctx = canvas.getContext('2d');
 const ui = {
-  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), calMeterFill: document.getElementById('calMeterFill'), calPercent: document.getElementById('calPercentText'), downloadArea: document.getElementById('downloadArea'), calOverlay: document.getElementById('calOverlay'), calOverlayFill: document.getElementById('calOverlayFill'), calOverlayPercent: document.getElementById('calOverlayPercent'), calOverlayTitle: document.getElementById('calOverlayTitle')
+  modeLabel: document.getElementById('modeLabel'), big: document.getElementById('bigInstruction'), sub: document.getElementById('subInstruction'), state: document.getElementById('stateText'), score: document.getElementById('scoreText'), fail: document.getElementById('failText'), gesture: document.getElementById('gestureText'), hand: document.getElementById('handText'), voice: document.getElementById('voiceStatusText'), accuracy: document.getElementById('accuracyText'), rt: document.getElementById('rtText'), log: document.getElementById('logBox'), calStatus: document.getElementById('calStatus'), calFill: document.getElementById('calFill'), calMeterFill: document.getElementById('calMeterFill'), calPercent: document.getElementById('calPercentText'), downloadArea: document.getElementById('downloadArea'), calOverlay: document.getElementById('calOverlay'), calOverlayFill: document.getElementById('calOverlayFill'), calOverlayPercent: document.getElementById('calOverlayPercent'), calOverlayTitle: document.getElementById('calOverlayTitle'), videoPanel: document.querySelector('.videoPanel')
 };
-const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.getElementById('btnSound'), fingerCal:document.getElementById('btnFingerCal'), train:document.getElementById('btnTrainStart'), abort:document.getElementById('btnAbort'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop') };
+const btn = { camera:document.getElementById('btnCameraOnly'), sound:document.getElementById('btnSound'), fingerCal:document.getElementById('btnFingerCal'), train:document.getElementById('btnTrainStart'), abort:document.getElementById('btnAbort'), pause:document.getElementById('btnPause'), stop:document.getElementById('btnStop'), expand:document.getElementById('btnCamExpand'), shrink:document.getElementById('btnCamShrink') };
 
 const messages = {
   sound_test:'소리 안내가 활성화되었습니다.',
@@ -786,6 +811,7 @@ async function startCameraOnly(){
     speakText('camera_ready_sequence', `카메라가 켜졌습니다. 지금은 훈련 전 준비 상태입니다. 필요하면 손가락 동작 보정 버튼을 누르세요. 훈련 시작 버튼을 누르면 ${selectedTaskIntroBrief()} 안내 후 목표가 나타납니다.`, true);
     setInstruction('카메라만 켜졌습니다','선택: ③ 손가락 동작 보정 또는 ④ 훈련 시작. 보정을 하지 않아도 자동 기준으로 훈련할 수 있습니다.','ready');
     log('카메라만 켜졌습니다. 아직 훈련은 시작되지 않았습니다. 이 상태에서는 선택한 훈련 목표를 생성하지 않습니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 누르면 자동 또는 보정 기준으로 시작합니다.');
+    preloadSpriteImages(900);
     renderLoop();
   }catch(e){ console.error(e); setInstruction('카메라 또는 모델을 시작할 수 없습니다','HTTPS 접속, 카메라 권한, 브라우저를 확인하세요.','bad'); log(String(e)); }
 }
@@ -798,30 +824,37 @@ function stopApp(){
   setInstruction('카메라가 정지되었습니다','다시 시작하려면 ① 카메라만 켜기 버튼을 누르세요.','info');
   updateUI();
 }
-function startTraining(){
-  resetSessionForNewAction('훈련 시작');
+async function startTraining(){
   if(!running || !cameraOnlyReady){
+    resetSessionForNewAction('훈련 시작');
     setInstruction('먼저 ① 카메라만 켜기를 누르세요','카메라 미리보기와 손 인식이 준비된 뒤 보정과 훈련을 진행하세요.','warn');
     speakText('need_camera_train','먼저 카메라만 켜기 버튼을 누르세요. 카메라가 켜진 뒤 보정과 훈련을 시작할 수 있습니다.',true);
     return;
   }
+  // 보정 중에는 훈련 시작이 보정을 끊지 않도록, 세션 초기화보다 먼저 차단합니다.
   if(combinedCalActive || calMode || calWaitingForStart){
-    setInstruction('보정이 진행 중입니다','보정이 끝난 뒤 ④ 훈련 시작 버튼을 누르세요.','warn');
-    speakText('wait_cal_done','보정이 진행 중입니다. 보정이 끝난 뒤 훈련 시작 버튼을 누르세요.',true);
+    setInstruction('보정이 진행 중입니다','손가락 동작 보정이 완전히 끝난 뒤 ④ 훈련 시작 버튼을 누르세요.','warn');
     return;
   }
+  resetSessionForNewAction('훈련 시작');
   const run=trainingRunId;
   paused=false;
   trainingActive=false;
   holdStart=null; successLock=false;
-  // 목표물을 먼저 보여 주고, 음성 안내 중에는 판정하지 않습니다.
+
+  // 1) 목표물을 먼저 만들고 즉시 카메라 화면에 그립니다.
   prepareGamePreview();
-  stage='training_preview'; state='training_preview'; updateUI();
+  await preloadSpriteImages(900);
+  forcePreviewDraw();
+  await delay(180);
+
+  // 2) 목표물이 보이는 상태에서 짧은 안내를 출력합니다. 이 동안에는 아직 성공/실패 판정하지 않습니다.
   const intro = conciseTrainingIntroText();
-  setInstruction('훈련 준비 중','', 'warn');
+  setInstruction('목표 확인','', 'ready');
   speakTextWithCallback('task_intro_'+run, intro, true, ()=>{
     if(run!==trainingRunId || !running || paused || combinedCalActive) return;
-    speakTextWithCallback('training_start_now_'+run, '시작하세요.', true, ()=>{
+    forcePreviewDraw();
+    speakTextWithCallback('training_start_now_'+run, '목표를 확인하세요. 시작하세요.', true, ()=>{
       if(run!==trainingRunId || !running || paused || combinedCalActive) return;
       activatePreparedGame();
     }, false);
@@ -844,7 +877,13 @@ function prepareGamePreview(){
   updateUI();
   spawnTaskTarget();
   setInstruction('목표 확인','', 'ready');
+  forcePreviewDraw();
   updateUI();
+}
+function forcePreviewDraw(){
+  try{
+    if(canvas && canvas.width && canvas.height){ drawScene(null,null); updateUI(); }
+  }catch(e){ console.warn('preview draw failed', e); }
 }
 function activatePreparedGame(){
   if(!target) spawnTaskTarget();
@@ -1827,6 +1866,23 @@ function renderLoop(){
     processGame(m,hand.handed,hand.score); drawScene(hand,m); updateUI();
   }catch(e){ console.error(e); log(String(e)); }
 }
+function setCameraExpanded(expanded){
+  const panel=ui.videoPanel;
+  if(!panel) return;
+  panel.classList.toggle('expandedCamera', !!expanded);
+  document.body.classList.toggle('cameraExpanded', !!expanded);
+  if(expanded){
+    try{ if(panel.requestFullscreen && !document.fullscreenElement) panel.requestFullscreen().catch(()=>{}); }catch(e){}
+  }else{
+    try{ if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{}); }catch(e){}
+  }
+  setTimeout(()=>forcePreviewDraw(), 80);
+}
+document.addEventListener('fullscreenchange', ()=>{
+  if(!document.fullscreenElement && ui.videoPanel) ui.videoPanel.classList.remove('expandedCamera');
+  document.body.classList.toggle('cameraExpanded', !!document.fullscreenElement || !!ui.videoPanel?.classList.contains('expandedCamera'));
+});
+
 function bindButtons(){
   window.startCameraOnly = startCameraOnly;
   window.unlockAudio = unlockAudio;
@@ -1838,6 +1894,8 @@ function bindButtons(){
   btn.abort.onclick = abortTraining;
   btn.pause.onclick = () => { stopAllSpeech('일시정지'); if(!trainingActive){ speakText('pause_only_training','일시정지는 훈련 중에만 사용합니다.',true); return; } paused=!paused; btn.pause.textContent=paused?'재개':'일시정지'; speakOnce(paused?'pause':'resume',true); };
   btn.stop.onclick = stopApp;
+  if(btn.expand) btn.expand.onclick = () => setCameraExpanded(true);
+  if(btn.shrink) btn.shrink.onclick = () => setCameraExpanded(false);
 }
 bindButtons();
 setInstruction('① 카메라만 켜기를 누르세요','순서: ① 카메라만 켜기 → ② 손가락 동작 보정 또는 자동 인식 → ③ 훈련 시작. 선택한 훈련 목표는 훈련 시작 버튼을 누르면 먼저 표시되고, 시작 안내 뒤 판정됩니다.','info');

@@ -141,7 +141,7 @@ LEVELS = {
     },
 }
 
-st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v30")
+st.title("🖐️ 뇌졸중 환자 손 기능 재활 가상훈련 v31")
 st.caption("MediaPipe Hands Web 기반 · 스마트폰/태블릿 브라우저 실행 · Python MediaPipe/OpenCV 불필요")
 
 with st.expander("📱 훈련 설정: 스마트폰에서도 여기에서 조정", expanded=True):
@@ -263,6 +263,9 @@ HTML = r'''
   .cameraSizeControls button { min-height:34px; padding:7px 11px; border-radius:999px; font-size:13px; white-space:nowrap; }
   .videoPanel.expandedCamera { position:fixed !important; inset:0 !important; width:100vw !important; height:100dvh !important; min-height:100dvh !important; z-index:99999 !important; border-radius:0 !important; background:#000; }
   .videoPanel.expandedCamera canvas { width:100vw !important; height:100dvh !important; aspect-ratio:auto !important; object-fit:contain; }
+  body.landscapePreferred .videoPanel.expandedCamera { background:#000; }
+  body.landscapePreferred .videoPanel.expandedCamera canvas { max-width:100vw; max-height:100dvh; }
+  @media (orientation: portrait) { .videoPanel.expandedCamera .cameraSizeControls { bottom:calc(14px + env(safe-area-inset-bottom)); } }
   .videoPanel.expandedCamera .cameraSizeControls { bottom:calc(12px + env(safe-area-inset-bottom)); }
   body.cameraExpanded { overflow:hidden; }
   .overlayBanner { display:none !important; }
@@ -293,14 +296,14 @@ HTML = r'''
 </head>
 <body>
 <div class="app">
-  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v30</div><div class="pill" id="modeLabel">로딩 중...</div></div>
+  <div class="topbar"><div class="title">🖐️ 손 기능 재활 가상훈련 v31</div><div class="pill" id="modeLabel">로딩 중...</div></div>
   <div class="grid">
     <div class="videoPanel">
       <video id="webcam" autoplay playsinline muted></video>
       <canvas id="outputCanvas"></canvas>
       <div class="overlayBanner"><div id="bigInstruction">① 카메라만 켜기를 누르세요</div><div id="subInstruction">카메라는 미리보기만 실행합니다. 손가락 동작 보정은 선택 사항이며, ④ 훈련 시작을 눌러야 선택한 훈련 목표가 나타납니다.</div></div>
       <div class="calOverlay" id="calOverlay"><div class="calOverlayTitle" id="calOverlayTitle">보정</div><div class="calOverlayMeter"><div class="calOverlayFill" id="calOverlayFill"></div></div><div class="calOverlayPercent" id="calOverlayPercent">0%</div></div>
-      <div class="cameraSizeControls"><button id="btnCamExpand" class="blue">화면 전체</button><button id="btnCamShrink">작게</button></div>
+      <div class="cameraSizeControls"><button id="btnCamExpand" class="blue">전체화면</button><button id="btnCamShrink">작게</button></div>
     </div>
     <div class="sidePanel">
       <div class="buttons">
@@ -653,17 +656,20 @@ function speakTextNoScreen(key, text, force=false){
 function estimateSpeechDurationMs(text){
   if(CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only') return 900;
   const len=String(text||'').replace(/\s+/g,'').length;
-  return clamp(1800 + len*135, 3000, 22000);
+  // Korean browser speech synthesis can lag on mobile devices.
+  // Use a conservative duration so callbacks never start measurement while guidance is still speaking.
+  return clamp(2400 + len*190, 4200, 30000);
 }
 function waitForSpeechCompletion(text, callback, generation, minExtraMs=350){
   const started=now();
   const minWait=estimateSpeechDurationMs(text) + minExtraMs;
-  const maxWait=Math.max(minWait+3500, 6500);
+  const maxWait=Math.max(minWait+3500, 8000);
   const tick=()=>{
     if(generation!==speechGeneration) return;
     const elapsed=now()-started;
     const speaking = !!(window.speechSynthesis && window.speechSynthesis.speaking);
     const pending = speechActive || speechQueue.length>0 || speaking;
+    // Do not trust early speechSynthesis end events on mobile; the minimum wait is always enforced.
     if(elapsed < minWait){ setTimeout(tick, 180); return; }
     if(!pending || elapsed>=maxWait){
       if(typeof callback==='function') callback();
@@ -954,8 +960,8 @@ function startFingerCalibration(){
   trainingActive=false; trainingPreviewActive=false; paused=false; target=null; particles=[]; stage='calibration_instruction'; holdStart=null; resetBubbleOpenGate(); clearCalibrationTimers();
   combinedCalActive=true; calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_open_instruction'; setCalOverlayLabel('손 펴기 준비'); resetCalProgress(); updateUI();
   const id=calStepId;
-  const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락 펴기 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 펼 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
-  setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
+  const explain = '손가락 동작 보정을 시작합니다. 먼저 손가락을 편 상태를 측정합니다. 아직 측정하지 않습니다. 이제 시작하세요 안내가 끝난 뒤 진행 바가 올라갈 때부터 측정합니다.';
+  setInstruction('손가락 동작 보정: 손 펴기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝난 뒤 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
   speakTextWithCallback('finger_cal_open_explain_'+id, explain, true, ()=>{
     if(!calibrationScheduleGuard(id)) return;
     beginCalibrationPrepare('open', id);
@@ -967,14 +973,24 @@ function beginCalibrationPrepare(mode, id){
   calMode=null; calSamples=[]; calWaitingForStart=true; calPrepMode=mode; stage='calibration_prepare'; state=mode==='open'?'cal_open_prepare':'cal_close_prepare'; resetCalProgress();
   const modeName = mode==='open' ? '손 펴기' : '손 쥐기';
   const action = mode==='open' ? '손가락을 최대한 편 상태' : '손가락을 최대한 구부려 쥔 상태';
-  setInstruction(`손가락 동작 보정: ${modeName} 준비`, '아직 측정하지 않습니다. “이제 시작하세요” 안내 뒤 3초 준비 시간이 지나면 진행 바가 올라갑니다.', 'warn');
-  speakText('finger_cal_'+mode+'_now_'+id, `이제 시작하세요. ${action}로 준비하세요. 진행 바가 올라가기 시작하면 3초 동안 그대로 유지하세요.`, true);
-  calPrepEnd = now() + (CONFIG.soundMode==='silent' || CONFIG.soundMode==='tone_only' ? 1500 : 3600);
+  setInstruction(`손가락 동작 보정: ${modeName} 준비`, '아직 측정하지 않습니다. 음성 안내가 끝난 뒤 진행 바가 올라가면 측정됩니다.', 'warn');
+  const nowText = `이제 시작하세요. ${action}로 준비하세요. 진행 바가 올라가면 3초 동안 그대로 유지하세요.`;
+  speakTextWithCallback('finger_cal_'+mode+'_now_'+id, nowText, true, ()=>{
+    if(!calibrationScheduleGuard(id)) return;
+    startCalibrationVisualCountdown(mode, id);
+  }, false);
+}
+function startCalibrationVisualCountdown(mode, id){
+  clearCalibrationTimers();
+  if(!calibrationScheduleGuard(id)) return;
+  const modeName = mode==='open' ? '손 펴기' : '손 쥐기';
+  calPrepEnd = now() + 1200;
+  setInstruction(`손가락 동작 보정: ${modeName} 측정 직전`, '이제 곧 진행 바가 올라갑니다. 아직 측정하지 않습니다.', 'warn');
   calPrepTimer=setInterval(()=>{
     if(!calibrationScheduleGuard(id)){ clearCalibrationTimers(); return; }
     const remain=Math.max(0, (calPrepEnd-now())/1000);
     resetCalProgress();
-    setInstruction(`손가락 동작 보정: ${modeName} 측정 준비`, `측정 시작까지 ${remain.toFixed(1)}초. 아직 측정하지 않습니다.`, 'warn');
+    setInstruction(`손가락 동작 보정: ${modeName} 측정 직전`, `측정 시작까지 ${remain.toFixed(1)}초. 진행 바가 올라가기 전까지는 측정하지 않습니다.`, 'warn');
     if(remain<=0){ clearCalibrationTimers(); beginCalibrationMeasurement(mode, id); }
   }, 120);
 }
@@ -991,8 +1007,8 @@ function beginCloseCalibrationInstruction(){
   clearCalibrationTimers();
   calMode=null; calSamples=[]; calStepId++; calWaitingForStart=true; state='cal_close_instruction'; stage='calibration_instruction'; setCalOverlayLabel('손 쥐기 준비'); resetCalProgress();
   const id=calStepId;
-  const explain = '이번에는 손가락 굽힘 동작을 측정합니다. 아직 측정하지 않습니다. 손가락을 최대한 구부릴 준비를 하세요. 안내가 끝나고 이제 시작하세요라는 짧은 안내와 준비 시간이 지난 다음, 진행 바가 0퍼센트에서 100퍼센트까지 올라가는 동안에만 실제 측정합니다.';
-  setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
+  const explain = '이번에는 손가락을 구부려 쥔 상태를 측정합니다. 아직 측정하지 않습니다. 이제 시작하세요 안내가 끝난 뒤 진행 바가 올라갈 때부터 측정합니다.';
+  setInstruction('손가락 동작 보정: 손 쥐기 설명 중','아직 측정하지 않습니다. 음성 안내가 끝난 뒤 진행 바가 올라갈 때부터 실제 측정합니다.','warn');
   speakTextWithCallback('finger_cal_close_explain_'+id, explain, true, ()=>{
     if(!calibrationScheduleGuard(id)) return;
     beginCalibrationPrepare('close', id);
@@ -1866,22 +1882,54 @@ function renderLoop(){
     processGame(m,hand.handed,hand.score); drawScene(hand,m); updateUI();
   }catch(e){ console.error(e); log(String(e)); }
 }
-function setCameraExpanded(expanded){
+function isMobileLike(){
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent) || matchMedia('(pointer: coarse)').matches;
+}
+async function requestLandscapeLock(){
+  if(!isMobileLike()) return false;
+  try{
+    if(screen.orientation && screen.orientation.lock){
+      await screen.orientation.lock('landscape');
+      document.body.classList.add('landscapePreferred');
+      updateVoiceStatus('가로 전체화면');
+      return true;
+    }
+  }catch(e){
+    console.info('orientation lock unavailable', e);
+  }
+  document.body.classList.add('landscapePreferred');
+  return false;
+}
+function unlockOrientation(){
+  try{ if(screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); }catch(e){}
+  document.body.classList.remove('landscapePreferred');
+}
+async function setCameraExpanded(expanded){
   const panel=ui.videoPanel;
   if(!panel) return;
   panel.classList.toggle('expandedCamera', !!expanded);
   document.body.classList.toggle('cameraExpanded', !!expanded);
   if(expanded){
-    try{ if(panel.requestFullscreen && !document.fullscreenElement) panel.requestFullscreen().catch(()=>{}); }catch(e){}
+    try{
+      if(panel.requestFullscreen && !document.fullscreenElement){
+        await panel.requestFullscreen({ navigationUI:'hide' }).catch(()=>panel.requestFullscreen().catch(()=>{}));
+      }
+    }catch(e){}
+    await requestLandscapeLock();
   }else{
-    try{ if(document.fullscreenElement && document.exitFullscreen) document.exitFullscreen().catch(()=>{}); }catch(e){}
+    unlockOrientation();
+    try{ if(document.fullscreenElement && document.exitFullscreen) await document.exitFullscreen().catch(()=>{}); }catch(e){}
   }
-  setTimeout(()=>forcePreviewDraw(), 80);
+  setTimeout(()=>forcePreviewDraw(), 120);
 }
 document.addEventListener('fullscreenchange', ()=>{
-  if(!document.fullscreenElement && ui.videoPanel) ui.videoPanel.classList.remove('expandedCamera');
-  document.body.classList.toggle('cameraExpanded', !!document.fullscreenElement || !!ui.videoPanel?.classList.contains('expandedCamera'));
+  const isFull=!!document.fullscreenElement;
+  if(!isFull && ui.videoPanel){ ui.videoPanel.classList.remove('expandedCamera'); unlockOrientation(); }
+  document.body.classList.toggle('cameraExpanded', isFull || !!ui.videoPanel?.classList.contains('expandedCamera'));
+  setTimeout(()=>forcePreviewDraw(), 140);
 });
+window.addEventListener('orientationchange', ()=>setTimeout(()=>forcePreviewDraw(), 300));
+window.addEventListener('resize', ()=>setTimeout(()=>forcePreviewDraw(), 180));
 
 function bindButtons(){
   window.startCameraOnly = startCameraOnly;
